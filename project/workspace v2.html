@@ -1,0 +1,2347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Urban Designer — Workspace</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; font-family: 'Inter', system-ui, sans-serif; background: #F8FAFC; color: #0F172A; }
+  #root { height: 100%; display: flex; flex-direction: column; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: #E2E8F0; border-radius: 2px; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #2563EB; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+  input[type=range].amber::-webkit-slider-thumb { background: #D97706; }
+  .fade-enter { animation: fadeIn 150ms ease forwards; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="workspace-components.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel">
+// ================================================================
+// URBAN DESIGNER — WORKSPACE PROTOTYPE
+// ================================================================
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── DESIGN TOKENS ──────────────────────────────────────────────
+const T = {
+  bg: '#F8FAFC', panel: '#FFFFFF', elevated: '#F1F5F9', subtle: '#E2E8F0',
+  border: '#E2E8F0', borderStrong: '#CBD5E1',
+  text: '#0F172A', textSec: '#475569', textMuted: '#94A3B8',
+  accent: '#2563EB', accentHover: '#1D4ED8', accentSubtle: '#EFF6FF', accentBorder: '#BFDBFE',
+  success: '#16A34A', warning: '#D97706', danger: '#DC2626',
+};
+
+// ── ELEMENT LIBRARY DATA ───────────────────────────────────────
+const ELEMENT_CATEGORIES = [
+  { id: 'streets', label: 'Streets & Corridors', icon: 'road', color: '#374151',
+    elements: [
+      { id: 'local-street', label: 'Local Street', color: '#1F2937', drawMode: 'line' },
+      { id: 'collector', label: 'Collector Street', color: '#1F2937', drawMode: 'line' },
+      { id: 'arterial', label: 'Arterial / Boulevard', color: '#1F2937', drawMode: 'line' },
+      { id: 'ped-street', label: 'Pedestrian Street', color: '#A8A29E', drawMode: 'line' },
+      { id: 'alley', label: 'Alley / Service Lane', color: '#374151', drawMode: 'line' },
+      { id: 'bike-lane', label: 'Protected Bike Lane', color: '#16A34A', drawMode: 'line' },
+      { id: 'shared-path', label: 'Shared Use Path', color: '#D1D5DB', drawMode: 'line' },
+    ]
+  },
+  { id: 'markings', label: 'Road Markings & Signage', icon: 'map', color: '#FBBF24',
+    elements: [
+      { id: 'stop-bar', label: 'Stop Bar', color: '#FFFFFF', drawMode: 'line' },
+      { id: 'crosswalk', label: 'Standard Crosswalk', color: '#FFFFFF', drawMode: 'line' },
+      { id: 'direction-arrow', label: 'Direction Arrow', color: '#FFFFFF', drawMode: 'place' },
+      { id: 'sharrow', label: 'Bicycle Stencil / Sharrow', color: '#16A34A', drawMode: 'place' },
+      { id: 'stop-sign', label: 'Stop Sign (R1-1)', color: '#DC2626', drawMode: 'place' },
+      { id: 'signal', label: 'Traffic Signal', color: '#111827', drawMode: 'place' },
+    ]
+  },
+  { id: 'crosswalks', label: 'Crosswalks & Pedestrian', icon: 'measure', color: '#2563EB',
+    elements: [
+      { id: 'std-crosswalk', label: 'Standard Crosswalk', color: '#FFFFFF', drawMode: 'line' },
+      { id: 'continental', label: 'Continental Crosswalk', color: '#FFFFFF', drawMode: 'line' },
+      { id: 'raised-xwalk', label: 'Raised Crosswalk', color: '#A8A29E', drawMode: 'line' },
+      { id: 'refuge-island', label: 'Pedestrian Refuge Island', color: '#D1D5DB', drawMode: 'polygon' },
+      { id: 'curb-ext', label: 'Curb Extension / Bulb-Out', color: '#D1D5DB', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'transit', label: 'Transit', icon: 'road', color: '#DC2626',
+    elements: [
+      { id: 'bus-route', label: 'Bus Route Line', color: '#DC2626', drawMode: 'line' },
+      { id: 'bus-stop', label: 'Bus Stop', color: '#2563EB', drawMode: 'place' },
+      { id: 'brt-station', label: 'BRT Station', color: '#EA580C', drawMode: 'place' },
+      { id: 'rail-track', label: 'Rail Track', color: '#374151', drawMode: 'line' },
+    ]
+  },
+  { id: 'paths', label: 'Paths & Active Transport', icon: 'bike', color: '#16A34A',
+    elements: [
+      { id: 'sidewalk', label: 'Sidewalk', color: '#D1D5DB', drawMode: 'line' },
+      { id: 'multi-path', label: 'Multi-Use Path', color: '#D1D5DB', drawMode: 'line' },
+      { id: 'steps', label: 'Steps / Stairs', color: '#D1D5DB', drawMode: 'line' },
+      { id: 'ada-ramp', label: 'ADA Accessible Ramp', color: '#D1D5DB', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'furniture', label: 'Street Furniture & Site', icon: 'tree', color: '#92400E',
+    elements: [
+      { id: 'bench', label: 'Bench', color: '#92400E', drawMode: 'place' },
+      { id: 'street-light', label: 'Street Light', color: '#64748B', drawMode: 'place' },
+      { id: 'bollard', label: 'Bollard', color: '#374151', drawMode: 'place' },
+      { id: 'bike-rack', label: 'Bicycle Rack', color: '#64748B', drawMode: 'place' },
+      { id: 'planter', label: 'Planter Box', color: '#78716C', drawMode: 'place' },
+      { id: 'waste-bin', label: 'Waste Receptacle', color: '#374151', drawMode: 'place' },
+      { id: 'playground', label: 'Playground Area', color: '#FCD34D', drawMode: 'polygon' },
+      { id: 'sports-court', label: 'Sports Court / Field', color: '#374151', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'landscape', label: 'Landscape — Ground', icon: 'water', color: '#22C55E',
+    elements: [
+      { id: 'lawn', label: 'Lawn / Turf', color: '#22C55E', drawMode: 'polygon' },
+      { id: 'meadow', label: 'Meadow / Native Planting', color: '#84CC16', drawMode: 'polygon' },
+      { id: 'forest', label: 'Forest / Tree Canopy', color: '#15803D', drawMode: 'polygon' },
+      { id: 'water', label: 'Water Body', color: '#3B82F6', drawMode: 'polygon' },
+      { id: 'mulch', label: 'Mulch / Planting Bed', color: '#92400E', drawMode: 'polygon' },
+      { id: 'gravel', label: 'Decomposed Granite', color: '#D97706', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'planting', label: 'Landscape — Planting', icon: 'tree', color: '#15803D',
+    elements: [
+      { id: 'tree', label: 'Tree (Individual)', color: '#22C55E', drawMode: 'place' },
+      { id: 'street-tree', label: 'Street Tree (Row)', color: '#22C55E', drawMode: 'line' },
+      { id: 'shrub', label: 'Shrub', color: '#16A34A', drawMode: 'place' },
+      { id: 'hedge', label: 'Hedge', color: '#15803D', drawMode: 'line' },
+      { id: 'groundcover', label: 'Groundcover', color: '#86EFAC', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'buildings', label: 'Buildings', icon: 'building', color: '#334155',
+    elements: [
+      { id: 'sfh', label: 'Single-Family Detached', color: '#334155', drawMode: 'polygon' },
+      { id: 'duplex', label: 'Duplex', color: '#334155', drawMode: 'polygon' },
+      { id: 'townhouse', label: 'Townhouse / Rowhouse', color: '#475569', drawMode: 'polygon' },
+      { id: 'midrise', label: 'Mid-Rise Multifamily', color: '#334155', drawMode: 'polygon' },
+      { id: 'mixed-use', label: 'Mixed-Use Retail+Res', color: '#1D4ED8', drawMode: 'polygon' },
+      { id: 'office', label: 'Office Building', color: '#1E3A5F', drawMode: 'polygon' },
+      { id: 'civic', label: 'Civic / Institutional', color: '#4C1D95', drawMode: 'polygon' },
+      { id: 'parking-deck', label: 'Parking Structure', color: '#374151', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'landuse', label: 'Land Use & Zoning', icon: 'grid', color: '#F59E0B',
+    elements: [
+      { id: 'low-res', label: 'Low-Density Residential', color: '#FDE68A', drawMode: 'polygon' },
+      { id: 'med-res', label: 'Medium-Density Res.', color: '#FCD34D', drawMode: 'polygon' },
+      { id: 'high-res', label: 'High-Density Res.', color: '#FCA5A5', drawMode: 'polygon' },
+      { id: 'mixed', label: 'Mixed Use', color: '#F9A8D4', drawMode: 'polygon' },
+      { id: 'commercial', label: 'Commercial / Retail', color: '#FECACA', drawMode: 'polygon' },
+      { id: 'parks', label: 'Parks & Open Space', color: '#6EE7B7', drawMode: 'polygon' },
+      { id: 't4', label: 'T4 — General Urban', color: '#FEF08A', drawMode: 'polygon' },
+      { id: 't5', label: 'T5 — Urban Center', color: '#FCD34D', drawMode: 'polygon' },
+      { id: 't6', label: 'T6 — Urban Core', color: '#F59E0B', drawMode: 'polygon' },
+    ]
+  },
+  { id: 'annotations', label: 'Site Annotations', icon: 'dimension', color: '#F97316',
+    elements: [
+      { id: 'site-boundary', label: 'Site Boundary', color: '#F97316', drawMode: 'polygon' },
+      { id: 'property-line', label: 'Property Line', color: '#DB2777', drawMode: 'polygon' },
+      { id: 'setback', label: 'Setback Line', color: '#FBBF24', drawMode: 'line' },
+      { id: 'height-limit', label: 'Height Limit Overlay', color: '#BFDBFE', drawMode: 'polygon' },
+      { id: 'phase-boundary', label: 'Phase Boundary', color: '#FED7AA', drawMode: 'polygon' },
+    ]
+  },
+];
+
+// ── SAMPLE DRAWN ELEMENTS (mock canvas content) ─────────────────
+const SAMPLE_ELEMENTS = [
+  { id: 'e1', type: 'local-street', category: 'streets', label: 'Main Street', visible: true, locked: false, phase: 'Existing' },
+  { id: 'e2', type: 'local-street', category: 'streets', label: 'Oak Avenue', visible: true, locked: false, phase: 'Existing' },
+  { id: 'e3', type: 'bike-lane', category: 'streets', label: 'Protected Bike Lane', visible: true, locked: false, phase: 'Phase 1' },
+  { id: 'e4', type: 'arterial', category: 'streets', label: 'Central Boulevard', visible: true, locked: true, phase: 'Existing' },
+  { id: 'e5', type: 'sidewalk', category: 'paths', label: 'North Sidewalk', visible: true, locked: false, phase: 'Phase 1' },
+  { id: 'e6', type: 'sidewalk', category: 'paths', label: 'South Sidewalk', visible: true, locked: false, phase: 'Phase 1' },
+  { id: 'e7', type: 'continental', category: 'crosswalks', label: 'Continental Crossing — Main/Oak', visible: true, locked: false, phase: 'Phase 1' },
+  { id: 'e8', type: 'tree', category: 'planting', label: 'Street Tree (Oak)', visible: true, locked: false, phase: 'Phase 2' },
+  { id: 'e9', type: 'tree', category: 'planting', label: 'Street Tree (Maple)', visible: true, locked: false, phase: 'Phase 2' },
+  { id: 'e10', type: 'lawn', category: 'landscape', label: 'Central Park Lawn', visible: true, locked: false, phase: 'Existing' },
+  { id: 'e11', type: 'mixed-use', category: 'buildings', label: 'Mixed-Use Block A', visible: true, locked: false, phase: 'Phase 2' },
+  { id: 'e12', type: 'midrise', category: 'buildings', label: 'Residential Tower', visible: true, locked: false, phase: 'Phase 3' },
+  { id: 'e13', type: 'bus-stop', category: 'transit', label: 'Bus Stop — Main St', visible: true, locked: false, phase: 'Phase 1' },
+  { id: 'e14', type: 'street-light', category: 'furniture', label: 'Street Light Row', visible: true, locked: false, phase: 'Phase 1' },
+];
+
+// ── TOOL STRIP DATA ─────────────────────────────────────────────
+const TOOLS = [
+  { group: 'selection', tools: [
+    { id: 'select', label: 'Select / Move', shortcut: 'V', icon: 'select' },
+    { id: 'direct', label: 'Direct Select', shortcut: 'A', icon: 'directSelect' },
+  ]},
+  { group: 'drawing', tools: [
+    { id: 'pen', label: 'Pen / Path', shortcut: 'P', icon: 'pen' },
+    { id: 'line', label: 'Line', shortcut: 'L', icon: 'line' },
+    { id: 'rect', label: 'Rectangle', shortcut: 'R', icon: 'rect' },
+    { id: 'ellipse', label: 'Ellipse', shortcut: 'E', icon: 'ellipse' },
+    { id: 'polygon', label: 'Polygon', shortcut: 'G', icon: 'polygon' },
+  ]},
+  { group: 'editing', tools: [
+    { id: 'addNode', label: 'Add Node', shortcut: '+', icon: 'addNode' },
+    { id: 'delNode', label: 'Delete Node', shortcut: '−', icon: 'deleteNode' },
+    { id: 'scissors', label: 'Scissors', shortcut: 'C', icon: 'scissors' },
+  ]},
+  { group: 'annotation', tools: [
+    { id: 'text', label: 'Text', shortcut: 'T', icon: 'text' },
+    { id: 'dimension', label: 'Dimension', shortcut: 'X', icon: 'dimension' },
+    { id: 'measure', label: 'Measure', shortcut: 'M', icon: 'measure' },
+  ]},
+  { group: 'view', tools: [
+    { id: 'hand', label: 'Hand / Pan', shortcut: 'H', icon: 'hand' },
+    { id: 'zoom', label: 'Zoom', shortcut: 'Z', icon: 'zoom' },
+  ]},
+];
+
+// ── MOCK SATELLITE MAP SVG ─────────────────────────────────────
+const MockSatelliteMap = ({ nightMode }) => (
+  <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }} xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="gridPat" width="60" height="60" patternUnits="userSpaceOnUse">
+        <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="0.5"/>
+      </pattern>
+      {/* Tree canopy */}
+      <radialGradient id="canopyGrad" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stopColor="#1a4d1a"/>
+        <stop offset="100%" stopColor="#0d2e0d"/>
+      </radialGradient>
+    </defs>
+
+    {/* Base satellite */}
+    <rect width="100%" height="100%" fill="#1a2035"/>
+    {/* City blocks */}
+    <rect x="0" y="0" width="100%" height="100%" fill="url(#gridPat)"/>
+    {/* Major roads (dark asphalt) */}
+    <rect x="0" y="42%" width="100%" height="5%" fill="#111827" opacity="0.9"/>
+    <rect x="38%" y="0" width="4.5%" height="100%" fill="#111827" opacity="0.9"/>
+    <rect x="0" y="68%" width="100%" height="3.5%" fill="#1F2937" opacity="0.8"/>
+    <rect x="65%" y="0" width="3%" height="100%" fill="#1F2937" opacity="0.8"/>
+    {/* City blocks */}
+    <rect x="2%" y="2%" width="34%" height="38%" fill="#1e2d3d" rx="2"/>
+    <rect x="44%" y="2%" width="19%" height="38%" fill="#1c2839" rx="2"/>
+    <rect x="2%" y="49%" width="34%" height="17%" fill="#1e2d3d" rx="2"/>
+    <rect x="44%" y="49%" width="19%" height="17%" fill="#1c2839" rx="2"/>
+    <rect x="70%" y="2%" width="28%" height="38%" fill="#1b2736" rx="2"/>
+    <rect x="70%" y="49%" width="28%" height="17%" fill="#1b2736" rx="2"/>
+    <rect x="2%" y="74%" width="60%" height="24%" fill="#1e2d3d" rx="2"/>
+    <rect x="70%" y="74%" width="28%" height="24%" fill="#1b2736" rx="2"/>
+    {/* Buildings */}
+    <rect x="4%" y="4%" width="8%" height="10%" fill="#243447" rx="1"/>
+    <rect x="14%" y="4%" width="12%" height="14%" fill="#1d2f42" rx="1"/>
+    <rect x="27%" y="4%" width="7%" height="8%" fill="#243447" rx="1"/>
+    <rect x="46%" y="4%" width="7%" height="10%" fill="#1f3245" rx="1"/>
+    <rect x="55%" y="5%" width="6%" height="8%" fill="#243447" rx="1"/>
+    <rect x="72%" y="4%" width="10%" height="18%" fill="#1d3048" rx="1"/>
+    <rect x="84%" y="4%" width="12%" height="12%" fill="#243447" rx="1"/>
+    <rect x="4%" y="51%" width="14%" height="11%" fill="#243447" rx="1"/>
+    <rect x="20%" y="52%" width="8%" height="9%" fill="#1d2f42" rx="1"/>
+    <rect x="72%" y="51%" width="14%" height="11%" fill="#243447" rx="1"/>
+    <rect x="88%" y="52%" width="8%" height="9%" fill="#1f3245" rx="1"/>
+    <rect x="4%" y="76%" width="16%" height="20%" fill="#1d3048" rx="1"/>
+    <rect x="22%" y="77%" width="10%" height="18%" fill="#243447" rx="1"/>
+    <rect x="34%" y="76%" width="20%" height="20%" fill="#1d2f42" rx="1"/>
+    <rect x="72%" y="76%" width="10%" height="16%" fill="#243447" rx="1"/>
+    <rect x="84%" y="77%" width="12%" height="14%" fill="#1f3245" rx="1"/>
+    {/* Park / green space */}
+    <rect x="44%" y="74%" width="19%" height="24%" fill="#0d2d0d" rx="2"/>
+    <circle cx="48%" cy="82%" r="3%" fill="#122d12"/>
+    <circle cx="54%" cy="78%" r="2.5%" fill="#0f2a0f"/>
+    <circle cx="59%" cy="86%" r="2%" fill="#122d12"/>
+    <circle cx="50%" cy="90%" r="2.5%" fill="#0f2a0f"/>
+    {/* Water feature */}
+    <ellipse cx="20%" cy="30%" rx="6%" ry="4%" fill="#1a3a5c" opacity="0.8"/>
+    {/* Sidewalk lines */}
+    <rect x="0" y="40.5%" width="100%" height="1%" fill="#2d3748" opacity="0.5"/>
+    <rect x="0" y="47.5%" width="100%" height="1%" fill="#2d3748" opacity="0.5"/>
+    <rect x="36.5%" y="0" width="1%" height="100%" fill="#2d3748" opacity="0.5"/>
+    <rect x="43%" y="0" width="1%" height="100%" fill="#2d3748" opacity="0.5"/>
+    {/* Crosswalk marks */}
+    {[0,1,2,3,4,5].map(i => (
+      <rect key={i} x={`${37.5 + i*0.8}%`} y="40.5%" width="0.5%" height="1%" fill="#4a5568" opacity="0.7"/>
+    ))}
+
+    {/* Proposed elements overlay (mock drawn content) */}
+    {/* Bike lane overlay */}
+    <rect x="0" y="41.5%" width="36.5%" height="1.2%" fill="#16A34A" opacity="0.7" rx="0"/>
+    {/* Continental crosswalk */}
+    {[0,1,2,3,4].map(i => (
+      <rect key={i} x={`${37.5}%`} y={`${41 + i*0.4}%`} width="4.5%" height="0.3%" fill="white" opacity="0.9"/>
+    ))}
+    {/* Street trees (row) */}
+    {[5,10,15,21,26,31].map(i => (
+      <circle key={i} cx={`${i}%`} cy="40%" r="1.5%" fill="#1a5c1a" opacity="0.85" stroke="#22C55E" strokeWidth="0.5"/>
+    ))}
+    {/* Mixed-use building highlight */}
+    <rect x="46%" y="4%" width="7%" height="10%" fill="#1D4ED8" opacity="0.6" rx="1" stroke="#3B82F6" strokeWidth="1"/>
+
+    {/* Night mode overlay */}
+    {nightMode && (
+      <rect width="100%" height="100%" fill="rgba(10,15,26,0.72)"/>
+    )}
+    {/* Street lights glow (night mode) */}
+    {nightMode && [
+      { cx: '5%', cy: '42%' }, { cx: '10%', cy: '42%' }, { cx: '16%', cy: '42%' },
+      { cx: '22%', cy: '42%' }, { cx: '28%', cy: '42%' }, { cx: '34%', cy: '42%' },
+    ].map((pos, i) => (
+      <g key={i}>
+        <radialGradient id={`glow${i}`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#FEF3C7" stopOpacity="0.6"/>
+          <stop offset="100%" stopColor="#FEF3C7" stopOpacity="0"/>
+        </radialGradient>
+        <circle cx={pos.cx} cy={pos.cy} r="5%" fill={`url(#glow${i})`}/>
+        <circle cx={pos.cx} cy={pos.cy} r="0.5%" fill="#FEF3C7" opacity="0.95"/>
+      </g>
+    ))}
+    {/* Building window lights (night) */}
+    {nightMode && (
+      <>
+        <rect x="14%" y="4%" width="12%" height="14%" fill="#1d2f42" opacity="0.3"/>
+        {[0,1,2,3,4,5,6,7].map(r => [0,1,2,3].map(c => (
+          <rect key={`${r}-${c}`} x={`${15 + c * 2.5}%`} y={`${5 + r * 1.5}%`} width="1%" height="0.8%"
+            fill="#FEF08A" opacity={Math.random() > 0.35 ? 0.7 : 0.1} rx="0.2%"/>
+        )))}
+      </>
+    )}
+  </svg>
+);
+
+// ── TOOL STRIP ──────────────────────────────────────────────────
+const ToolStrip = ({ activeTool, onToolSelect }) => {
+  const s = {
+    strip: { width: 48, minWidth: 48, background: T.panel, borderRight: `1px solid ${T.border}`, display: 'flex', flexDirection: 'column', gap: 0, paddingTop: 6, paddingBottom: 6, zIndex: 10 },
+    divider: { height: 1, background: T.border, margin: '6px 8px' },
+    btn: (active) => ({
+      width: 36, height: 36, margin: '2px auto', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      borderRadius: 6, cursor: 'pointer', border: 'none', background: active ? T.accentSubtle : 'transparent',
+      borderLeft: active ? `2px solid ${T.accent}` : '2px solid transparent',
+      color: active ? T.accent : T.textSec, transition: 'all 100ms ease', position: 'relative',
+    }),
+  };
+  return (
+    <div style={s.strip}>
+      {TOOLS.map((group, gi) => (
+        <React.Fragment key={group.group}>
+          {gi > 0 && <div style={s.divider}/>}
+          {group.tools.map(tool => (
+            <Tooltip key={tool.id} label={tool.label} shortcut={tool.shortcut}>
+              <button style={s.btn(activeTool === tool.id)} onClick={() => onToolSelect(tool.id)}>
+                <Icon name={tool.icon} size={16} color={activeTool === tool.id ? T.accent : T.textSec}/>
+              </button>
+            </Tooltip>
+          ))}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+// ── STYLE BAR ───────────────────────────────────────────────────
+const StyleBar = ({ activeTool }) => {
+  const [strokeColor, setStrokeColor] = useState('#2563EB');
+  const [fillColor, setFillColor] = useState('#EFF6FF');
+  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [lineType, setLineType] = useState('solid');
+  const [opacity, setOpacity] = useState(100);
+  const fontActive = activeTool === 'text';
+
+  const s = {
+    bar: { height: 36, background: T.panel, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', paddingLeft: 8, paddingRight: 8, gap: 0, overflow: 'hidden' },
+    sep: { width: 1, height: 20, background: T.border, margin: '0 8px' },
+    label: { fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: T.textMuted, marginRight: 5, whiteSpace: 'nowrap' },
+    swatch: (c) => ({ width: 22, height: 22, borderRadius: 4, background: c, border: `1.5px solid ${T.borderStrong}`, cursor: 'pointer', flexShrink: 0 }),
+    input: { height: 24, padding: '0 6px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 4, background: T.elevated, color: T.text, width: 48, outline: 'none' },
+    pill: (active) => ({ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: `1px solid ${active ? T.accent : T.border}`, background: active ? T.accentSubtle : 'transparent', color: active ? T.accent : T.textSec, cursor: 'pointer', whiteSpace: 'nowrap' }),
+    zone: (disabled) => ({ display: 'flex', alignItems: 'center', opacity: disabled ? 0.35 : 1, pointerEvents: disabled ? 'none' : 'all' }),
+  };
+
+  return (
+    <div style={s.bar}>
+      <div style={s.zone(false)}>
+        <span style={s.label}>Stroke</span>
+        <div style={s.swatch(strokeColor)}/>
+        <input type="text" value={strokeColor} onChange={e => setStrokeColor(e.target.value)}
+          style={{ ...s.input, marginLeft: 4, width: 70, fontFamily: 'monospace', fontSize: 11 }}/>
+        <input type="number" value={strokeWidth} onChange={e => setStrokeWidth(+e.target.value)}
+          style={{ ...s.input, marginLeft: 4, width: 44 }} min={0.5} max={50} step={0.5}/>
+        <span style={{ ...s.label, marginLeft: 3 }}>pt</span>
+      </div>
+      <div style={s.sep}/>
+      <div style={s.zone(false)}>
+        <span style={s.label}>Line Type</span>
+        {['solid','dashed','dotted','double'].map(lt => (
+          <button key={lt} style={{ ...s.pill(lineType === lt), marginRight: 3 }} onClick={() => setLineType(lt)}>{lt}</button>
+        ))}
+      </div>
+      <div style={s.sep}/>
+      <div style={s.zone(false)}>
+        <span style={s.label}>Arrowheads</span>
+        <button style={{ ...s.pill(false), marginRight: 3 }}>None</button>
+        <button style={{ ...s.pill(false), marginRight: 3 }}>Start →</button>
+        <button style={{ ...s.pill(false) }}>← End</button>
+      </div>
+      <div style={s.sep}/>
+      <div style={s.zone(false)}>
+        <span style={s.label}>Fill</span>
+        <div style={s.swatch(fillColor)}/>
+        <input type="text" value={fillColor} onChange={e => setFillColor(e.target.value)}
+          style={{ ...s.input, marginLeft: 4, width: 70, fontFamily: 'monospace', fontSize: 11 }}/>
+      </div>
+      <div style={s.sep}/>
+      <div style={s.zone(!fontActive)}>
+        <span style={s.label}>Font</span>
+        <select style={{ ...s.input, width: 90 }}>
+          <option>Inter</option><option>Arial</option><option>Mono</option>
+        </select>
+        <input type="number" defaultValue={14} style={{ ...s.input, marginLeft: 4, width: 44 }}/>
+      </div>
+      <div style={s.sep}/>
+      <div style={s.zone(false)}>
+        <span style={s.label}>Opacity</span>
+        <input type="range" min={0} max={100} value={opacity} onChange={e => setOpacity(+e.target.value)} style={{ width: 72 }}/>
+        <span style={{ ...s.label, marginLeft: 5, marginRight: 0, minWidth: 28 }}>{opacity}%</span>
+      </div>
+    </div>
+  );
+};
+
+// ── TOP BAR ────────────────────────────────────────────────────
+const TopBar = ({ projectName, setProjectName, savedState, nightMode, setNightMode, mode3D, setMode3D, onShare, onShowShadow, showMetrics, setShowMetrics, onNavigate }) => {
+  const [editingName, setEditingName] = useState(false);
+  const [tmpName, setTmpName] = useState(projectName);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const nameRef = useRef(null);
+
+  const s = {
+    bar: { height: 52, background: T.panel, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, gap: 8, zIndex: 100, position: 'relative', flexShrink: 0 },
+    logo: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginRight: 8, textDecoration: 'none' },
+    logoMark: { width: 40, height: 40, background: '#A3B57A', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 16, letterSpacing: '0.04em', fontFamily: "'Inter Tight', sans-serif" },
+    logoText: { fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "'Inter Tight', sans-serif", letterSpacing: '-0.02em' },
+    divider: { width: 1, height: 24, background: T.border, margin: '0 4px' },
+    projectName: { fontSize: 14, fontWeight: 500, color: T.text, padding: '3px 6px', borderRadius: 4, border: '1.5px solid transparent', cursor: 'pointer', minWidth: 120, maxWidth: 240, background: 'transparent', outline: 'none', ':hover': { background: T.elevated } },
+    menuBtn: { height: 28, padding: '0 10px', fontSize: 12, fontWeight: 500, borderRadius: 5, border: `1px solid ${T.border}`, background: 'transparent', color: T.textSec, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 },
+    iconBtn: { width: 32, height: 32, borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec },
+    saveStatus: { fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, color: savedState === 'saved' ? T.success : savedState === 'saving' ? T.textMuted : T.warning },
+    pillBtn: (active, color) => ({ height: 28, padding: '0 10px', fontSize: 12, fontWeight: 500, borderRadius: 5, border: `1px solid ${active ? color : T.border}`, background: active ? `${color}18` : 'transparent', color: active ? color : T.textSec, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }),
+    shareBtn: { height: 30, padding: '0 14px', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
+    avatar: { width: 30, height: 30, borderRadius: '50%', background: '#DDD6FE', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#5B21B6', cursor: 'pointer', border: `1.5px solid ${T.border}` },
+    unitToggle: { display: 'flex', border: `1px solid ${T.border}`, borderRadius: 5, overflow: 'hidden' },
+    unitBtn: (active) => ({ padding: '3px 8px', fontSize: 11, fontWeight: active ? 600 : 400, background: active ? T.accent : 'transparent', color: active ? '#fff' : T.textSec, border: 'none', cursor: 'pointer' }),
+    fileMenu: { position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, boxShadow: '0 8px 32px rgba(15,23,42,0.12)', zIndex: 999, minWidth: 180, padding: '4px 0' },
+    fileItem: { padding: '7px 14px', fontSize: 13, color: T.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 },
+    fileDivider: { height: 1, background: T.border, margin: '3px 0' },
+  };
+
+  const saveMap = { saved: '✓ Saved', saving: 'Saving…', unsaved: '● Unsaved' };
+
+  return (
+    <div style={s.bar}>
+      {/* Logo */}
+      <div style={s.logo} onClick={() => onNavigate('dashboard')}>
+        <div style={s.logoMark}>UD</div>
+      </div>
+      <div style={s.divider}/>
+      {/* Project name */}
+      {editingName ? (
+        <input ref={nameRef} value={tmpName} onChange={e => setTmpName(e.target.value)}
+          onBlur={() => { setProjectName(tmpName); setEditingName(false); }}
+          onKeyDown={e => { if (e.key === 'Enter') { setProjectName(tmpName); setEditingName(false); } if (e.key === 'Escape') { setTmpName(projectName); setEditingName(false); } }}
+          style={{ ...s.projectName, border: `1.5px solid ${T.accent}`, background: T.accentSubtle, outline: 'none' }}
+          autoFocus/>
+      ) : (
+        <div style={s.projectName} onDoubleClick={() => setEditingName(true)}>{projectName}</div>
+      )}
+      {/* File menu */}
+      <div style={{ position: 'relative' }}>
+        <button style={s.menuBtn} onClick={() => setFileMenuOpen(!fileMenuOpen)}>
+          File <Icon name="chevronDown" size={12}/>
+        </button>
+        {fileMenuOpen && (
+          <div style={s.fileMenu} onMouseLeave={() => setFileMenuOpen(false)}>
+            {[['file','New'], ['copy','Duplicate'], ['upload','Import…'], null, ['download','Export PNG…'], ['download','Export PDF…'], ['download','Export GeoJSON'], null, ['file','Print Layout…']].map((item, i) =>
+              item ? (
+                <div key={i} style={s.fileItem} onMouseEnter={e => e.currentTarget.style.background = T.elevated} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <Icon name={item[0]} size={13} color={T.textSec}/> {item[1]}
+                </div>
+              ) : <div key={i} style={s.fileDivider}/>
+            )}
+          </div>
+        )}
+      </div>
+      {/* Undo/Redo */}
+      <Tooltip label="Undo" shortcut="⌘Z" placement="bottom">
+        <button style={s.iconBtn}><Icon name="undo" size={16}/></button>
+      </Tooltip>
+      <Tooltip label="Redo" shortcut="⌘⇧Z" placement="bottom">
+        <button style={s.iconBtn}><Icon name="redo" size={16}/></button>
+      </Tooltip>
+      <div style={s.divider}/>
+      {/* Save status */}
+      <div style={s.saveStatus}>
+        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{saveMap[savedState]}</span>
+      </div>
+      <div style={{ flex: 1 }}/>
+      {/* Units — moved next to Night Mode */}
+      <div style={s.unitToggle}>
+        <button style={s.unitBtn(true)}>ft</button>
+        <button style={s.unitBtn(false)}>m</button>
+      </div>
+      {/* Night Mode */}
+      <Tooltip label={nightMode ? 'Day Mode' : 'Night Mode'} placement="bottom">
+        <button style={s.pillBtn(nightMode, '#6366F1')} onClick={() => setNightMode(!nightMode)}>
+          <Icon name={nightMode ? 'sun' : 'moon'} size={14} color={nightMode ? '#6366F1' : T.textSec}/>
+          {nightMode && <span>Night</span>}
+        </button>
+      </Tooltip>
+      {/* Shadow — sun + building with shadow */}
+      <Tooltip label="Shadow Analysis" placement="bottom">
+        <button style={s.pillBtn(false, '#D97706')} onClick={onShowShadow}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            {/* Sun on the LEFT */}
+            <circle cx="4" cy="5" r="2.2" fill="#FBBF24" stroke="none"/>
+            <line x1="4" y1="8" x2="8" y2="11" stroke="#FBBF24" strokeWidth="1"/>
+            {/* Building in middle */}
+            <rect x="10" y="7" width="8" height="11" rx="0.5" fill={T.elevated} stroke={T.textSec}/>
+            {/* Shadow cast to the RIGHT */}
+            <path d="M18 18 L23 18 L20 14 L18 14 Z" fill="#CBD5E1" stroke="none" opacity="0.7"/>
+          </svg>
+        </button>
+      </Tooltip>
+      {/* 3D */}
+      <button style={s.pillBtn(mode3D, '#7C3AED')} onClick={() => setMode3D(!mode3D)}>
+        <Icon name="cube3d" size={14} color={mode3D ? '#7C3AED' : T.textSec}/>
+        {mode3D ? '3D' : '3D'}
+      </button>
+      <div style={s.divider}/>
+      {/* Share */}
+      <button style={s.shareBtn} onClick={onShare}>
+        <Icon name="share" size={14} color="#fff"/>
+        Share
+      </button>
+      {/* Avatar */}
+      <div style={s.avatar}>JD</div>
+    </div>
+  );
+};
+
+// ── RIGHT PANEL ZONE HEADER ─────────────────────────────────────
+const ZoneHeader = ({ label, collapsed, onToggle, children }) => (
+  <div style={{ borderBottom: `1px solid ${T.border}` }}>
+    <div onClick={onToggle} style={{ height: 34, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 12, paddingRight: 10, cursor: 'pointer', userSelect: 'none', background: '#EEF0F3', borderTop: '1px solid #DCE0E6', borderBottom: '1px solid #DCE0E6' }}>
+      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#0F172A' }}>{label}</span>
+      <Icon name={collapsed ? 'chevronRight' : 'chevronDown'} size={14} color="#0F172A"/>
+    </div>
+    {!collapsed && children}
+  </div>
+);
+
+// ── ZONE 1 — STYLE CONTROLS ─────────────────────────────────────
+const StyleZone = ({ collapsed, onToggle }) => {
+  const [sc, setSc] = useState('#2563EB');
+  const [fc, setFc] = useState('#EFF6FF');
+  const s = {
+    row: { display: 'flex', alignItems: 'center', padding: '5px 12px', gap: 8 },
+    label: { fontSize: 11, color: T.textSec, fontWeight: 500, width: 60, flexShrink: 0 },
+    swatch: (c) => ({ width: 22, height: 22, borderRadius: 4, background: c, border: `1.5px solid ${T.borderStrong}`, cursor: 'pointer', flexShrink: 0 }),
+    inp: { flex: 1, height: 26, padding: '0 7px', fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, outline: 'none', fontFamily: 'monospace' },
+    range: { flex: 1 },
+  };
+  return (
+    <ZoneHeader label="Style Controls" collapsed={collapsed} onToggle={onToggle}>
+      <div style={{ padding: '4px 0 8px' }}>
+        <div style={s.row}>
+          <span style={s.label}>Stroke</span>
+          <div style={s.swatch(sc)}/>
+          <input style={s.inp} value={sc} onChange={e => setSc(e.target.value)}/>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Fill</span>
+          <div style={s.swatch(fc)}/>
+          <input style={s.inp} value={fc} onChange={e => setFc(e.target.value)}/>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Weight</span>
+          <input type="range" min={0.5} max={20} step={0.5} defaultValue={2} style={s.range}/>
+          <span style={{ fontSize: 11, color: T.textSec, width: 28 }}>2 pt</span>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Line Type</span>
+          <select style={{ ...s.inp, fontFamily: 'inherit' }}>
+            <option>Solid</option><option>Dashed</option><option>Dotted</option><option>Double</option>
+          </select>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Arrowheads</span>
+          <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+            <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="None">
+              <svg width="32" height="10" viewBox="0 0 32 10"><line x1="2" y1="5" x2="30" y2="5" stroke="currentColor" strokeWidth="1.6"/></svg>
+            </button>
+            <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.accent}`, borderRadius: 5, background: T.accentSubtle, color: T.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Start">
+              <svg width="32" height="10" viewBox="0 0 32 10"><line x1="6" y1="5" x2="30" y2="5" stroke="currentColor" strokeWidth="1.6"/><polygon points="2,5 8,2 8,8" fill="currentColor"/></svg>
+            </button>
+            <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="End">
+              <svg width="32" height="10" viewBox="0 0 32 10"><line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" strokeWidth="1.6"/><polygon points="30,5 24,2 24,8" fill="currentColor"/></svg>
+            </button>
+            <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Both">
+              <svg width="32" height="10" viewBox="0 0 32 10"><line x1="6" y1="5" x2="26" y2="5" stroke="currentColor" strokeWidth="1.6"/><polygon points="2,5 8,2 8,8" fill="currentColor"/><polygon points="30,5 24,2 24,8" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Font Style</span>
+          <select style={{ ...s.inp, fontFamily: 'inherit', flex: 1 }}>
+            <option>Inter</option><option>Inter Tight</option><option>Serif</option><option>Mono</option>
+          </select>
+          <button style={{ width: 26, height: 26, fontSize: 12, fontWeight: 700, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, cursor: 'pointer' }}>B</button>
+          <button style={{ width: 26, height: 26, fontSize: 12, fontStyle: 'italic', border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, cursor: 'pointer' }}>I</button>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Font Size</span>
+          <input type="range" min={8} max={48} defaultValue={12} style={s.range}/>
+          <span style={{ fontSize: 11, color: T.textSec, width: 28 }}>12 pt</span>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Font Color</span>
+          <div style={s.swatch('#0F172A')}/>
+          <input style={s.inp} defaultValue="#0F172A"/>
+        </div>
+        <div style={s.row}>
+          <span style={s.label}>Opacity</span>
+          <input type="range" min={0} max={100} defaultValue={100} style={s.range}/>
+          <span style={{ fontSize: 11, color: T.textSec, width: 28 }}>100%</span>
+        </div>
+      </div>
+    </ZoneHeader>
+  );
+};
+
+// ── ELEMENT TILE PREVIEW ────────────────────────────────────────
+// Plan-view (and a few elevations for buildings) — clean, simple, no emoji.
+const TP = {
+  asphalt: '#3F4853', asphaltLight: '#525B66',
+  concrete: '#D9D5CE', concreteDark: '#B6B0A6',
+  ground: '#E9E4DA', paint: '#F5F2EA',
+  yellow: '#E0B83C',
+  green: '#6A8E5A', greenDark: '#4F7042', greenLight: '#A6C291',
+  water: '#7FA8C7', waterLight: '#A8C5DC',
+  brick: '#A8624A', brickDark: '#7C4634',
+  brown: '#7C5A3C', brownDark: '#5A4128',
+  red: '#B43A2E', blue: '#3D6FA0', navy: '#1F3148',
+  amber: '#C28B30', warm: '#C9985E',
+  text: '#1F2937',
+};
+
+const tpBox = (W, H, fill) => <rect width={W} height={H} fill={fill}/>;
+
+const TilePreview = ({ el }) => {
+  const W = 100, H = 48;
+  const id = el.id;
+  const VB = `0 0 ${W} ${H}`;
+
+  if (id === 'local-street' || id === 'collector') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={10} width={W} height={28} fill={TP.asphalt}/>
+      <line x1="0" y1={24} x2={W} y2={24} stroke={TP.yellow} strokeWidth="0.9" strokeDasharray="6 4"/>
+    </svg>
+  );
+  if (id === 'arterial') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={4} width={W} height={40} fill={TP.asphalt}/>
+      <line x1="0" y1={22} x2={W} y2={22} stroke={TP.yellow} strokeWidth="0.8"/>
+      <line x1="0" y1={26} x2={W} y2={26} stroke={TP.yellow} strokeWidth="0.8"/>
+      <line x1="0" y1={13} x2={W} y2={13} stroke={TP.paint} strokeWidth="0.7" strokeDasharray="5 4"/>
+      <line x1="0" y1={35} x2={W} y2={35} stroke={TP.paint} strokeWidth="0.7" strokeDasharray="5 4"/>
+    </svg>
+  );
+  if (id === 'ped-street') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.concrete)}
+      {[0,1,2,3].map(r => [0,1,2,3,4,5,6,7,8,9].map(c => (
+        <rect key={r+'-'+c} x={c*10} y={r*12} width="9.4" height="11.4" fill={(r+c)%2===0 ? TP.concrete : TP.concreteDark}/>
+      )))}
+    </svg>
+  );
+  if (id === 'alley') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={16} width={W} height={16} fill={TP.asphaltLight}/>
+    </svg>
+  );
+  if (id === 'bike-lane') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={14} width={W} height={20} fill={TP.greenDark}/>
+      <line x1="0" y1={14} x2={W} y2={14} stroke={TP.paint} strokeWidth="1"/>
+      <line x1="0" y1={34} x2={W} y2={34} stroke={TP.paint} strokeWidth="1"/>
+      <circle cx={36} cy={24} r="3.2" fill="none" stroke={TP.paint} strokeWidth="1"/>
+      <circle cx={64} cy={24} r="3.2" fill="none" stroke={TP.paint} strokeWidth="1"/>
+      <line x1={32} y1={24} x2={68} y2={24} stroke={TP.paint} strokeWidth="0.9"/>
+    </svg>
+  );
+  if (id === 'shared-path' || id === 'multi-path') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={14} width={W} height={20} fill={TP.concreteDark}/>
+      <line x1="0" y1={24} x2={W} y2={24} stroke={TP.paint} strokeWidth="0.7" strokeDasharray="4 3"/>
+    </svg>
+  );
+  if (id === 'stop-bar') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}<rect x={18} y={20} width={64} height={6} fill={TP.paint}/>
+    </svg>
+  );
+  if (id === 'crosswalk' || id === 'std-crosswalk') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      {[16,30,44,58,72,86].map(x => (<rect key={x} x={x-3} y={8} width={6} height={32} fill={TP.paint}/>))}
+    </svg>
+  );
+  if (id === 'continental') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      {[12,24,36,48,60,72,84].map(x => (<rect key={x} x={x-3} y={6} width={6} height={36} fill={TP.paint}/>))}
+    </svg>
+  );
+  if (id === 'raised-xwalk') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      <rect y={4} width={W} height={40} fill={TP.concreteDark}/>
+      {[16,30,44,58,72,86].map(x => (<rect key={x} x={x-3} y={10} width={6} height={28} fill={TP.paint}/>))}
+    </svg>
+  );
+  if (id === 'direction-arrow') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      <path d={`M${W/2} 8 L${W/2-10} 22 L${W/2-3.5} 22 L${W/2-3.5} 40 L${W/2+3.5} 40 L${W/2+3.5} 22 L${W/2+10} 22 Z`} fill={TP.paint}/>
+    </svg>
+  );
+  if (id === 'sharrow') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      <circle cx={W/2-5} cy={28} r="3" fill="none" stroke={TP.paint} strokeWidth="1"/>
+      <circle cx={W/2+5} cy={28} r="3" fill="none" stroke={TP.paint} strokeWidth="1"/>
+      <line x1={W/2-5} y1={28} x2={W/2+5} y2={28} stroke={TP.paint} strokeWidth="0.9"/>
+      <path d={`M${W/2-6} 18 L${W/2} 12 L${W/2+6} 18`} fill="none" stroke={TP.paint} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d={`M${W/2-6} 14 L${W/2} 8 L${W/2+6} 14`} fill="none" stroke={TP.paint} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  if (id === 'stop-sign') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <polygon points={`${W/2},10 ${W/2+10},14 ${W/2+14},24 ${W/2+10},34 ${W/2},38 ${W/2-10},34 ${W/2-14},24 ${W/2-10},14`} fill={TP.red} stroke={TP.paint} strokeWidth="1.2"/>
+      <text x={W/2} y={27.5} fontSize="7" fill={TP.paint} textAnchor="middle" fontWeight="700">STOP</text>
+    </svg>
+  );
+  if (id === 'signal') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={W/2-7} y={6} width={14} height={36} rx={2} fill={TP.navy}/>
+      <circle cx={W/2} cy={14} r="3" fill={TP.red}/>
+      <circle cx={W/2} cy={24} r="3" fill={TP.amber}/>
+      <circle cx={W/2} cy={34} r="3" fill={TP.green}/>
+    </svg>
+  );
+  if (id === 'refuge-island' || id === 'curb-ext') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.asphalt)}
+      <rect x={20} y={12} width={60} height={24} fill={TP.concrete} stroke={TP.paint} strokeWidth="1"/>
+    </svg>
+  );
+  if (id === 'bus-route') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <line x1="0" y1={24} x2={W} y2={24} stroke={TP.red} strokeWidth="3" strokeDasharray="10 4"/>
+    </svg>
+  );
+  if (id === 'bus-stop') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={W/2-10} y={12} width={20} height={24} rx={2} fill={TP.blue}/>
+      <text x={W/2} y={29} fontSize="13" fill={TP.paint} textAnchor="middle" fontWeight="700">B</text>
+    </svg>
+  );
+  if (id === 'brt-station') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={W/2-16} y={14} width={32} height={20} rx={2} fill={TP.warm}/>
+      <text x={W/2} y={28} fontSize="9" fill={TP.paint} textAnchor="middle" fontWeight="700">BRT</text>
+    </svg>
+  );
+  if (id === 'rail-track') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[8,18,28,38,48,58,68,78,88].map(x => (<rect key={x} x={x-3} y={16} width={6} height={16} fill={TP.brown}/>))}
+      <line x1="0" y1={20} x2={W} y2={20} stroke={TP.asphaltLight} strokeWidth="1.4"/>
+      <line x1="0" y1={28} x2={W} y2={28} stroke={TP.asphaltLight} strokeWidth="1.4"/>
+    </svg>
+  );
+  if (id === 'sidewalk') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect y={14} width={W} height={20} fill={TP.concrete}/>
+      {[20,40,60,80].map(x => (<line key={x} x1={x} y1={14} x2={x} y2={34} stroke={TP.concreteDark} strokeWidth="0.8"/>))}
+    </svg>
+  );
+  if (id === 'steps') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[...Array(8)].map((_,i) => (<rect key={i} x={4+i*12} y={12} width={11} height={24} fill={i%2===0 ? TP.concreteDark : TP.concrete}/>))}
+    </svg>
+  );
+  if (id === 'ada-ramp') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <polygon points="24,12 76,12 86,36 14,36" fill={TP.concrete} stroke={TP.concreteDark} strokeWidth="0.8"/>
+      {[0,1,2,3].map(r => [0,1,2,3,4,5,6,7].map(c => (<circle key={r+'-'+c} cx={22+c*8} cy={16+r*5.5} r="0.9" fill={TP.amber}/>)))}
+    </svg>
+  );
+  if (id === 'bench') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={20} y={20} width={60} height={3} fill={TP.brownDark}/>
+      <rect x={20} y={24} width={60} height={4} fill={TP.brown}/>
+      <rect x={22} y={28} width={3} height={6} fill={TP.asphaltLight}/>
+      <rect x={75} y={28} width={3} height={6} fill={TP.asphaltLight}/>
+    </svg>
+  );
+  if (id === 'street-light') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <circle cx={W/2} cy={H/2} r={H/2-4} fill={TP.amber} opacity="0.18"/>
+      <circle cx={W/2} cy={H/2} r="3.5" fill={TP.amber} stroke={TP.navy} strokeWidth="1"/>
+    </svg>
+  );
+  if (id === 'bollard') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[28,50,72].map(x => (
+        <g key={x}>
+          <circle cx={x} cy={H/2} r="4" fill={TP.navy}/>
+          <circle cx={x} cy={H/2} r="2" fill={TP.amber}/>
+        </g>
+      ))}
+    </svg>
+  );
+  if (id === 'bike-rack') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[24,40,56,72].map(x => (<line key={x} x1={x} y1={14} x2={x} y2={34} stroke={TP.asphaltLight} strokeWidth="2.2" strokeLinecap="round"/>))}
+    </svg>
+  );
+  if (id === 'planter') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={26} y={12} width={48} height={24} fill={TP.brown} stroke={TP.brownDark} strokeWidth="0.8"/>
+      <circle cx={W/2-9} cy={20} r="4" fill={TP.green}/>
+      <circle cx={W/2+9} cy={20} r="4" fill={TP.green}/>
+      <circle cx={W/2} cy={28} r="5" fill={TP.greenDark}/>
+    </svg>
+  );
+  if (id === 'waste-bin') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <circle cx={W/2} cy={H/2} r="9" fill={TP.asphaltLight}/>
+      <circle cx={W/2} cy={H/2} r="6" fill={TP.navy}/>
+    </svg>
+  );
+  if (id === 'playground') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      <rect width={W} height={H} fill={TP.warm} opacity="0.55"/>
+      <circle cx={28} cy={H/2} r="7" fill={TP.brick} stroke={TP.brickDark} strokeWidth="0.8"/>
+      <rect x={48} y={16} width={20} height={16} fill={TP.greenDark} stroke={TP.green} strokeWidth="0.8"/>
+      <circle cx={80} cy={H/2} r="7" fill={TP.blue} opacity="0.7"/>
+    </svg>
+  );
+  if (id === 'sports-court') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      <rect width={W} height={H} fill={TP.brick} opacity="0.65"/>
+      <rect x={10} y={8} width={W-20} height={H-16} fill="none" stroke={TP.paint} strokeWidth="0.9"/>
+      <line x1={W/2} y1={8} x2={W/2} y2={H-8} stroke={TP.paint} strokeWidth="0.9"/>
+      <circle cx={W/2} cy={H/2} r="6" fill="none" stroke={TP.paint} strokeWidth="0.9"/>
+    </svg>
+  );
+  if (id === 'lawn') return <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">{tpBox(W,H,TP.greenLight)}</svg>;
+  if (id === 'meadow') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.greenLight)}
+      {[12,22,32,42,52,62,72,82,92].map((x,i) => (
+        <circle key={x} cx={x} cy={i%2===0 ? 18 : 32} r="1.6" fill={i%3===0 ? TP.amber : i%3===1 ? '#D7799C' : TP.paint}/>
+      ))}
+    </svg>
+  );
+  if (id === 'forest') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.greenDark)}
+      {[14,30,46,62,78,94,22,38,54,70,86].map((x,i) => (
+        <circle key={i} cx={x} cy={i<6 ? 16 : 34} r="6.5" fill={TP.green} stroke={TP.greenDark} strokeWidth="0.6"/>
+      ))}
+    </svg>
+  );
+  if (id === 'water') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.water)}
+      <path d="M0 16 Q25 12 50 16 T100 16" stroke={TP.waterLight} strokeWidth="0.9" fill="none"/>
+      <path d="M0 26 Q25 22 50 26 T100 26" stroke={TP.waterLight} strokeWidth="0.9" fill="none"/>
+      <path d="M0 36 Q25 32 50 36 T100 36" stroke={TP.waterLight} strokeWidth="0.9" fill="none"/>
+    </svg>
+  );
+  if (id === 'mulch') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.brown)}
+      {[[12,12],[28,18],[40,28],[60,14],[72,32],[86,20],[20,36],[50,38],[80,38],[14,28]].map(([x,y],i) => (<ellipse key={i} cx={x} cy={y} rx="2.8" ry="1.4" fill={TP.brownDark}/>))}
+    </svg>
+  );
+  if (id === 'gravel') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      <rect width={W} height={H} fill="#C9B28A"/>
+      {[[10,10],[20,18],[32,12],[44,22],[56,16],[68,24],[80,12],[90,20],[15,30],[35,36],[55,32],[75,38],[88,34]].map(([x,y],i) => (<circle key={i} cx={x} cy={y} r="1.4" fill={TP.brownDark}/>))}
+    </svg>
+  );
+  if (id === 'tree') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <circle cx={W/2} cy={H/2} r="15" fill={TP.green} stroke={TP.greenDark} strokeWidth="0.9"/>
+      <circle cx={W/2} cy={H/2} r="2" fill={TP.brownDark}/>
+    </svg>
+  );
+  if (id === 'street-tree') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[14,34,54,74,94].map(x => (
+        <g key={x}>
+          <circle cx={x} cy={H/2} r="8" fill={TP.green} stroke={TP.greenDark} strokeWidth="0.7"/>
+          <circle cx={x} cy={H/2} r="1.4" fill={TP.brownDark}/>
+        </g>
+      ))}
+    </svg>
+  );
+  if (id === 'shrub') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <circle cx={W/2-7} cy={H/2-1} r="7" fill={TP.green}/>
+      <circle cx={W/2+7} cy={H/2-3} r="7" fill={TP.green}/>
+      <circle cx={W/2} cy={H/2+5} r="6.5" fill={TP.greenDark}/>
+    </svg>
+  );
+  if (id === 'hedge') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={4} y={16} width={W-8} height={16} rx={2} fill={TP.greenDark}/>
+      {[12,28,44,60,76,90].map(x => (<circle key={x} cx={x} cy={20} r="3" fill={TP.green}/>))}
+    </svg>
+  );
+  if (id === 'groundcover') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.greenLight)}
+      {[[10,10],[22,16],[34,10],[46,16],[58,12],[70,18],[82,12],[94,16],[16,28],[28,32],[40,28],[52,34],[64,30],[76,34],[88,30]].map(([x,y],i) => (<circle key={i} cx={x} cy={y} r="1.8" fill={TP.green}/>))}
+    </svg>
+  );
+  if (id === 'sfh') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <polygon points="28,22 50,10 72,22" fill={TP.brickDark}/>
+      <rect x={28} y={22} width={44} height={20} fill={TP.brick}/>
+      <rect x={45} y={28} width={10} height={14} fill={TP.brownDark}/>
+      <rect x={34} y={28} width={6} height={6} fill={TP.waterLight}/>
+      <rect x={60} y={28} width={6} height={6} fill={TP.waterLight}/>
+    </svg>
+  );
+  if (id === 'duplex') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <polygon points="22,22 50,10 78,22" fill={TP.brickDark}/>
+      <rect x={22} y={22} width={56} height={20} fill={TP.brick}/>
+      <line x1={50} y1={22} x2={50} y2={42} stroke={TP.paint} strokeWidth="0.9"/>
+      <rect x={32} y={28} width={6} height={6} fill={TP.waterLight}/>
+      <rect x={62} y={28} width={6} height={6} fill={TP.waterLight}/>
+      <rect x={42} y={32} width={5} height={10} fill={TP.brownDark}/>
+      <rect x={53} y={32} width={5} height={10} fill={TP.brownDark}/>
+    </svg>
+  );
+  if (id === 'townhouse') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      {[18,40,62,84].map((x,i) => (
+        <g key={x}>
+          <rect x={x-10} y={14} width={20} height={28} fill={[TP.brick, TP.warm, TP.brown, TP.brickDark][i]}/>
+          <rect x={x-3} y={32} width={6} height={10} fill={TP.brownDark}/>
+          <rect x={x-7} y={20} width={4} height={5} fill={TP.waterLight}/>
+          <rect x={x+3} y={20} width={4} height={5} fill={TP.waterLight}/>
+        </g>
+      ))}
+    </svg>
+  );
+  if (id === 'midrise') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={20} y={6} width={60} height={36} fill={TP.warm}/>
+      {[0,1,2,3].map(r => [0,1,2,3,4].map(c => (<rect key={r+'-'+c} x={26+c*10} y={11+r*8} width={6} height={4} fill={TP.waterLight}/>)))}
+    </svg>
+  );
+  if (id === 'mixed-use') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={14} y={6} width={72} height={28} fill={TP.warm}/>
+      <rect x={14} y={34} width={72} height={10} fill={TP.brick}/>
+      {[0,1,2].map(r => [0,1,2,3,4,5].map(c => (<rect key={r+'-'+c} x={18+c*11} y={10+r*8} width={6} height={4} fill={TP.waterLight}/>)))}
+      <rect x={42} y={37} width={6} height={7} fill={TP.brownDark}/>
+    </svg>
+  );
+  if (id === 'office') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={18} y={4} width={64} height={40} fill={TP.navy}/>
+      {[0,1,2,3,4].map(r => [0,1,2,3,4,5].map(c => (<rect key={r+'-'+c} x={22+c*10} y={8+r*7} width={6} height={3.5} fill={TP.waterLight}/>)))}
+    </svg>
+  );
+  if (id === 'civic') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <polygon points="14,22 50,8 86,22" fill={TP.concreteDark}/>
+      <rect x={14} y={22} width={72} height={22} fill={TP.concrete}/>
+      {[-22,-8,8,22].map((dx,i) => (<rect key={i} x={W/2+dx-2.5} y={26} width={5} height={18} fill={TP.concreteDark}/>))}
+      <rect x={W/2-5} y={32} width={10} height={12} fill={TP.brownDark}/>
+    </svg>
+  );
+  if (id === 'parking-deck') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={14} y={6} width={72} height={38} fill={TP.concreteDark}/>
+      {[0,1,2,3].map(r => (<line key={r} x1={14} y1={14+r*8} x2={86} y2={14+r*8} stroke={TP.concrete} strokeWidth="1.5"/>))}
+      <text x={W/2} y={30} fontSize="13" fill={TP.paint} textAnchor="middle" fontWeight="700">P</text>
+    </svg>
+  );
+  if (['low-res','med-res','high-res','mixed','commercial','parks','t4','t5','t6'].includes(id)) {
+    return (
+      <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+        <rect width={W} height={H} fill={el.color} opacity="0.7"/>
+        <text x={W/2} y={H/2+4} fontSize="11" fill={TP.text} textAnchor="middle" fontWeight="700" opacity="0.7">{id.toUpperCase()}</text>
+      </svg>
+    );
+  }
+  if (id === 'site-boundary') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={6} y={6} width={W-12} height={H-12} fill="none" stroke={TP.amber} strokeWidth="1.6"/>
+    </svg>
+  );
+  if (id === 'property-line') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <line x1="6" y1={H/2} x2={W-6} y2={H/2} stroke={TP.red} strokeWidth="1.4" strokeDasharray="10 3 2 3"/>
+    </svg>
+  );
+  if (id === 'setback') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <line x1="6" y1={H/2} x2={W-6} y2={H/2} stroke={TP.amber} strokeWidth="1.3" strokeDasharray="5 4"/>
+    </svg>
+  );
+  if (id === 'height-limit') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      <rect width={W} height={H} fill={TP.water} opacity="0.4"/>
+      <text x={W/2} y={H/2+4} fontSize="11" fill={TP.navy} textAnchor="middle" fontWeight="700">45 ft max</text>
+    </svg>
+  );
+  if (id === 'phase-boundary') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      <rect width={W} height={H} fill={TP.warm} opacity="0.4"/>
+      <rect x={6} y={6} width={W-12} height={H-12} fill="none" stroke={TP.amber} strokeWidth="1.4" strokeDasharray="6 3"/>
+    </svg>
+  );
+  if (el.drawMode === 'line') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <line x1="8" y1={H/2} x2={W-8} y2={H/2} stroke={el.color} strokeWidth="2.5"/>
+    </svg>
+  );
+  if (el.drawMode === 'polygon') return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <rect x={20} y={10} width={W-40} height={H-20} fill={el.color} opacity="0.7" stroke={el.color} strokeWidth="1.2"/>
+    </svg>
+  );
+  return (
+    <svg width="100%" height={H} viewBox={VB} preserveAspectRatio="none">
+      {tpBox(W,H,TP.ground)}
+      <circle cx={W/2} cy={H/2} r="6" fill={el.color} stroke={TP.paint} strokeWidth="1.2"/>
+    </svg>
+  );
+};
+
+// ── ZONE 2 — ELEMENT LIBRARY ────────────────────────────────────
+const ElementLibrary = ({ collapsed, onToggle, onSelectElement }) => {
+  const [search, setSearch] = useState('');
+  const [openCats, setOpenCats] = useState({ streets: true });
+  const toggleCat = (id) => setOpenCats(p => ({ ...p, [id]: !p[id] }));
+
+  const filtered = search.trim() ? ELEMENT_CATEGORIES.map(cat => ({
+    ...cat, elements: cat.elements.filter(e => e.label.toLowerCase().includes(search.toLowerCase()))
+  })).filter(cat => cat.elements.length > 0) : ELEMENT_CATEGORIES;
+
+  const s = {
+    search: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px 6px', borderBottom: `1px solid ${T.border}` },
+    searchInp: { flex: 1, height: 28, padding: '0 8px 0 28px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 6, background: T.elevated, outline: 'none', color: T.text },
+    catHeader: { display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', cursor: 'pointer', background: T.elevated, borderBottom: `1px solid ${T.border}`, userSelect: 'none' },
+    catLabel: { fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.textMuted, flex: 1 },
+    tileGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '8px 10px' },
+    tile: (hover) => ({ borderRadius: 8, border: `1px solid ${hover ? T.borderStrong : T.border}`, background: hover ? T.elevated : T.panel, cursor: 'pointer', overflow: 'hidden', transition: 'border-color 100ms', userSelect: 'none' }),
+    tilePreview: (color) => ({ height: 48, background: T.elevated, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: `1px solid ${T.border}`, position: 'relative', overflow: 'hidden' }),
+    tileLine: (color) => ({ height: 4, width: '70%', borderRadius: 2, background: color, position: 'absolute' }),
+    tileLabel: { fontSize: 11, fontWeight: 500, color: '#334155', padding: '5px 7px', lineHeight: 1.3, textAlign: 'center' },
+  };
+
+  const [hoverTile, setHoverTile] = useState(null);
+
+  return (
+    <ZoneHeader label="Elements Library" collapsed={collapsed} onToggle={onToggle}>
+      <div style={s.search}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          <div style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)' }}>
+            <Icon name="search" size={12} color={T.textMuted}/>
+          </div>
+          <input style={s.searchInp} placeholder="Search elements…" value={search} onChange={e => setSearch(e.target.value)}/>
+        </div>
+      </div>
+      <div style={{ overflowY: 'auto', maxHeight: 340 }}>
+        {filtered.map(cat => (
+          <div key={cat.id}>
+            <div style={s.catHeader} onClick={() => toggleCat(cat.id)}>
+              <Icon name={cat.icon || 'map'} size={12} color={cat.color}/>
+              <span style={s.catLabel}>{cat.label}</span>
+              <span style={{ fontSize: 10, color: T.textMuted }}>{cat.elements.length}</span>
+              <Icon name={openCats[cat.id] ? 'chevronDown' : 'chevronRight'} size={12} color={T.textMuted}/>
+            </div>
+            {openCats[cat.id] && (
+              <div style={s.tileGrid}>
+                {cat.elements.map(el => (
+                  <div key={el.id}
+                    style={s.tile(hoverTile === el.id)}
+                    onMouseEnter={() => setHoverTile(el.id)}
+                    onMouseLeave={() => setHoverTile(null)}
+                    onClick={() => onSelectElement && onSelectElement(el)}>
+                    <div style={{ height: 48, background: T.elevated, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: `1px solid ${T.border}`, position: 'relative', overflow: 'hidden' }}>
+                      <TilePreview el={el}/>
+                    </div>
+                    <div style={s.tileLabel}>{el.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </ZoneHeader>
+  );
+};
+
+// ── DRAGGABLE CROSS-SECTION (drag rows to reorder) ──────────────
+const DraggableCrossSection = () => {
+  const [lanes, setLanes] = useState([
+    { id: 'sw1', label: 'Sidewalk', width: 8, color: '#D1D5DB' },
+    { id: 'pl1', label: 'Planting Strip', width: 5, color: '#22C55E' },
+    { id: 'bl1', label: 'Bike Lane', width: 8, color: '#16A34A' },
+    { id: 'tl1', label: 'Travel Lane', width: 11, color: '#374151' },
+    { id: 'tl2', label: 'Travel Lane', width: 11, color: '#374151' },
+    { id: 'bl2', label: 'Bike Lane', width: 8, color: '#16A34A' },
+    { id: 'pl2', label: 'Planting Strip', width: 5, color: '#22C55E' },
+    { id: 'sw2', label: 'Sidewalk', width: 8, color: '#D1D5DB' },
+  ]);
+  const [draggedIdx, setDraggedIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+
+  const onDragStart = (i) => setDraggedIdx(i);
+  const onDragOver = (e, i) => { e.preventDefault(); setOverIdx(i); };
+  const onDrop = () => {
+    if (draggedIdx === null || overIdx === null || draggedIdx === overIdx) {
+      setDraggedIdx(null); setOverIdx(null); return;
+    }
+    const next = [...lanes];
+    const [moved] = next.splice(draggedIdx, 1);
+    next.splice(overIdx, 0, moved);
+    setLanes(next);
+    setDraggedIdx(null); setOverIdx(null);
+  };
+  const removeLane = (id) => setLanes(ls => ls.filter(l => l.id !== id));
+  const updateWidth = (id, w) => setLanes(ls => ls.map(l => l.id === id ? { ...l, width: Math.max(2, Math.min(40, w || 2)) } : l));
+  const addLane = () => setLanes(ls => [...ls, { id: 'new_' + Date.now(), label: 'New Lane', width: 6, color: '#94A3B8' }]);
+  const totalWidth = lanes.reduce((a, b) => a + b.width, 0);
+
+  return (
+    <div style={{ paddingBottom: 6 }}>
+      <div style={{ background: T.elevated, margin: '8px 12px', borderRadius: 6, height: 64, display: 'flex', alignItems: 'stretch', overflow: 'hidden', border: `1px solid ${T.border}` }}>
+        {lanes.map((lane, i) => (
+          <div key={lane.id} style={{ flex: lane.width, background: lane.color, borderRight: i < lanes.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0 }}>
+            <span style={{ fontSize: 7, color: 'rgba(255,255,255,0.85)', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              {lane.width}'
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '2px 12px 6px', fontSize: 10, color: T.textMuted }}>Total ROW: {totalWidth} ft · Drag rows to reorder</div>
+      <div style={{ padding: '0 10px' }}>
+        {lanes.map((lane, i) => (
+          <div key={lane.id}
+            draggable
+            onDragStart={() => onDragStart(i)}
+            onDragOver={(e) => onDragOver(e, i)}
+            onDrop={onDrop}
+            onDragEnd={() => { setDraggedIdx(null); setOverIdx(null); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px',
+              background: T.panel, borderRadius: 5,
+              border: `1px solid ${overIdx === i && draggedIdx !== null && draggedIdx !== i ? T.accent : T.border}`,
+              marginBottom: 3, cursor: 'grab', userSelect: 'none',
+              opacity: draggedIdx === i ? 0.4 : 1,
+            }}>
+            <svg width="10" height="16" viewBox="0 0 10 16" fill={T.textMuted} style={{ flexShrink: 0 }}>
+              <circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/>
+              <circle cx="3" cy="8" r="1.2"/><circle cx="7" cy="8" r="1.2"/>
+              <circle cx="3" cy="13" r="1.2"/><circle cx="7" cy="13" r="1.2"/>
+            </svg>
+            <div style={{ width: 8, height: 28, borderRadius: 2, background: lane.color, flexShrink: 0 }}/>
+            <span style={{ fontSize: 11, fontWeight: 500, color: T.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lane.label}</span>
+            <input type="number" value={lane.width} min={2} max={40}
+              onChange={(e) => updateWidth(lane.id, +e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 36, height: 22, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 3, background: T.bg, textAlign: 'center', color: T.text, outline: 'none' }}/>
+            <span style={{ fontSize: 10, color: T.textMuted }}>ft</span>
+            <button onClick={() => removeLane(lane.id)} style={{ width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: T.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, flexShrink: 0 }}>
+              <Icon name="x" size={10}/>
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '4px 10px' }}>
+        <button onClick={addLane} style={{ width: '100%', height: 26, fontSize: 11, border: `1px dashed ${T.border}`, borderRadius: 5, background: 'transparent', color: T.textSec, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+          <Icon name="plus" size={12}/> Add Lane Component
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── ZONE 3 — ELEMENT DETAILS ────────────────────────────────────
+const ElementDetails = ({ collapsed, onToggle, selectedElement }) => {
+  const [openGroups, setOpenGroups] = useState({ geometry: true, crossSection: true, style: false, labels: false, data: false });
+  const toggleGroup = (g) => setOpenGroups(p => ({ ...p, [g]: !p[g] }));
+  const [bikeWidth, setBikeWidth] = useState(8);
+  const isStreet = selectedElement && selectedElement.category === 'streets';
+
+  const s = {
+    empty: { padding: 20, textAlign: 'center', color: T.textMuted, fontSize: 12, lineHeight: 1.6 },
+    header: { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px 6px', borderBottom: `1px solid ${T.border}` },
+    typeBadge: { width: 24, height: 24, borderRadius: 5, background: T.accentSubtle, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    typeName: { fontSize: 13, fontWeight: 600, color: T.text, flex: 1 },
+    headerBtn: (danger) => ({ width: 26, height: 26, borderRadius: 5, border: `1px solid ${danger ? '#FCA5A5' : T.border}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: danger ? T.danger : T.textSec }),
+    groupHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', background: T.elevated, cursor: 'pointer', borderBottom: `1px solid ${T.border}` },
+    groupLabel: { fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: T.textMuted },
+    row: { display: 'flex', alignItems: 'center', padding: '5px 12px', gap: 6 },
+    label: { fontSize: 12, fontWeight: 500, color: T.textSec, width: 90, flexShrink: 0 },
+    inp: { flex: 1, height: 26, padding: '0 7px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, outline: 'none' },
+    select: { flex: 1, height: 26, padding: '0 6px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, outline: 'none' },
+    toggle: (active) => ({ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: T.text, cursor: 'pointer' }),
+    toggleTrack: (active) => ({ width: 28, height: 16, borderRadius: 8, background: active ? T.accent : T.border, position: 'relative', transition: 'background 150ms', flexShrink: 0 }),
+    toggleThumb: (active) => ({ width: 12, height: 12, borderRadius: 6, background: '#fff', position: 'absolute', top: 2, left: active ? 14 : 2, transition: 'left 150ms', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }),
+    exportBtn: (primary) => ({ flex: 1, height: 30, fontSize: 11, fontWeight: 600, borderRadius: 5, border: `1px solid ${primary ? T.accent : T.border}`, background: primary ? T.accentSubtle : 'transparent', color: primary ? T.accent : T.textSec, cursor: 'pointer' }),
+    laneRow: (color) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: T.panel, borderRadius: 5, border: `1px solid ${T.border}`, marginBottom: 3 }),
+    laneHandle: (color) => ({ width: 8, height: 32, borderRadius: 2, background: color, flexShrink: 0, cursor: 'grab' }),
+    laneLabel: { fontSize: 11, fontWeight: 500, color: T.text, flex: 1 },
+    laneWidth: { fontSize: 11, color: T.textSec },
+    xsectDiagram: { background: T.elevated, margin: '8px 12px', borderRadius: 6, height: 64, display: 'flex', alignItems: 'stretch', overflow: 'hidden', border: `1px solid ${T.border}` },
+  };
+
+  const CROSS_SECTION = [
+    { label: 'Sidewalk', width: 8, color: '#D1D5DB' },
+    { label: 'Planting Strip', width: 5, color: '#22C55E' },
+    { label: 'Bike Lane', width: bikeWidth, color: '#16A34A' },
+    { label: 'Travel Lane', width: 11, color: '#374151' },
+    { label: 'Travel Lane', width: 11, color: '#374151' },
+    { label: 'Bike Lane', width: bikeWidth, color: '#16A34A' },
+    { label: 'Planting Strip', width: 5, color: '#22C55E' },
+    { label: 'Sidewalk', width: 8, color: '#D1D5DB' },
+  ];
+  const totalWidth = CROSS_SECTION.reduce((a, b) => a + b.width, 0);
+
+  const GroupHeader = ({ id, label }) => (
+    <div style={s.groupHeader} onClick={() => toggleGroup(id)}>
+      <span style={s.groupLabel}>{label}</span>
+      <Icon name={openGroups[id] ? 'chevronDown' : 'chevronRight'} size={12} color={T.textMuted}/>
+    </div>
+  );
+
+  if (!selectedElement) {
+    return (
+      <ZoneHeader label="Element Details" collapsed={collapsed} onToggle={onToggle}>
+        <div style={s.empty}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>⬚</div>
+          Select an element on the canvas to see its properties.
+        </div>
+      </ZoneHeader>
+    );
+  }
+
+  return (
+    <ZoneHeader label="Element Details" collapsed={collapsed} onToggle={onToggle}>
+      <div style={s.header}>
+        <div style={s.typeBadge}><Icon name="road" size={13} color={T.accent}/></div>
+        <div style={s.typeName}>{selectedElement.label}</div>
+        <button style={s.headerBtn(false)}><Icon name="copy" size={13}/></button>
+        <button style={s.headerBtn(true)}><Icon name="trash" size={13} color={T.danger}/></button>
+      </div>
+      <div style={{ overflowY: 'auto', maxHeight: 380 }}>
+        <GroupHeader id="geometry" label="Geometry"/>
+        {openGroups.geometry && (
+          <div style={{ paddingBottom: 4 }}>
+            <div style={s.row}><span style={s.label}>ROW Width</span><input style={s.inp} defaultValue="60 ft"/></div>
+            <div style={s.row}><span style={s.label}>Length</span><input style={s.inp} defaultValue="842 ft" readOnly style={{ ...s.inp, color: T.textSec }}/></div>
+            <div style={s.row}><span style={s.label}>Phase</span>
+              <select style={s.select}>
+                <option>Existing</option><option selected>Phase 1 — Near Term</option><option>Phase 2 — Mid Term</option><option>Phase 3 — Long Term</option>
+              </select>
+            </div>
+            <div style={s.row}><span style={s.label}>Surface</span>
+              <select style={s.select}><option>Asphalt</option><option>Concrete</option><option>Pavers</option></select>
+            </div>
+          </div>
+        )}
+
+        {isStreet && (
+          <>
+            <GroupHeader id="crossSection" label="Cross-Section"/>
+            {openGroups.crossSection && <DraggableCrossSection/>}
+          </>
+        )}
+
+        <GroupHeader id="style" label="Style"/>
+        {openGroups.style && (
+          <div style={{ padding: '6px 0' }}>
+            <div style={s.row}><span style={s.label}>Stroke Color</span><input style={{ ...s.inp, fontFamily: 'monospace' }} defaultValue="#1F2937"/></div>
+            <div style={s.row}><span style={s.label}>Stroke Width</span><input style={s.inp} defaultValue="2 pt"/></div>
+            <div style={s.row}><span style={s.label}>Opacity</span><input type="range" min={0} max={100} defaultValue={100} style={{ flex: 1 }}/></div>
+          </div>
+        )}
+
+        <GroupHeader id="labels" label="Labels"/>
+        {openGroups.labels && (
+          <div style={{ padding: '6px 0' }}>
+            <div style={s.row}><span style={s.label}>Name Label</span><input style={s.inp} defaultValue={selectedElement.label}/></div>
+            <div style={s.row}><span style={s.label}>Show Label</span>
+              <label style={s.toggle(true)}>
+                <div style={s.toggleTrack(true)}><div style={s.toggleThumb(true)}/></div>
+                Visible
+              </label>
+            </div>
+          </div>
+        )}
+
+        <GroupHeader id="data" label="Data"/>
+        {openGroups.data && (
+          <div style={{ padding: '6px 0' }}>
+            <div style={s.row}><span style={s.label}>Element ID</span><span style={{ fontSize: 11, fontFamily: 'monospace', color: T.textSec }}>ump_{selectedElement.id}</span></div>
+            <div style={s.row}><span style={s.label}>Category</span><span style={{ fontSize: 11, color: T.textSec, textTransform: 'capitalize' }}>{selectedElement.category}</span></div>
+            <div style={s.row}><span style={s.label}>Created</span><span style={{ fontSize: 11, color: T.textSec }}>May 3, 2026</span></div>
+          </div>
+        )}
+      </div>
+
+      {/* Export controls */}
+      <div style={{ padding: '8px 10px', borderTop: `1px solid ${T.border}`, display: 'flex', gap: 5, flexDirection: 'column' }}>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <button style={s.exportBtn(true)}>Export Element Data</button>
+          <button style={s.exportBtn(false)}>Copy Properties</button>
+        </div>
+        {isStreet && <button style={{ ...s.exportBtn(false), width: '100%' }}>Export Street Section to Scale…</button>}
+      </div>
+    </ZoneHeader>
+  );
+};
+
+// ── ZONE 4 — LAYERS ─────────────────────────────────────────────
+const LayersZone = ({ collapsed, onToggle, elements, setElements, selectedId, onSelect }) => {
+  const [groups, setGroups] = useState([
+    { id: 'existing', label: 'Existing', color: '#94A3B8', collapsed: false },
+    { id: 'phase1', label: 'Phase 1 — Near Term', color: '#2563EB', collapsed: false },
+    { id: 'phase2', label: 'Phase 2 — Mid Term', color: '#16A34A', collapsed: true },
+    { id: 'phase3', label: 'Phase 3 — Long Term', color: '#D97706', collapsed: true },
+  ]);
+
+  const phaseToGroupId = (phase) => {
+    if (phase === 'Existing') return 'existing';
+    if (phase === 'Phase 1') return 'phase1';
+    if (phase === 'Phase 2') return 'phase2';
+    if (phase === 'Phase 3') return 'phase3';
+    return 'existing';
+  };
+
+  // Flat ordered list: [{kind:'group',id}, {kind:'layer',id}, ...]
+  const [order, setOrder] = useState(() => {
+    const out = [];
+    const buckets = { existing: [], phase1: [], phase2: [], phase3: [] };
+    elements.forEach(e => {
+      const gid = phaseToGroupId(e.phase);
+      if (!buckets[gid]) buckets[gid] = [];
+      buckets[gid].push({ kind: 'layer', id: e.id });
+    });
+    ['existing','phase1','phase2','phase3'].forEach(gid => {
+      out.push({ kind: 'group', id: gid });
+      (buckets[gid] || []).forEach(it => out.push(it));
+    });
+    return out;
+  });
+
+  // Per-element layer data: visible / locked / inMetrics
+  const [elemData, setElemData] = useState(() =>
+    Object.fromEntries(elements.map(e => [e.id, { visible: e.visible, locked: e.locked, inMetrics: true }]))
+  );
+
+  const [draggedIdx, setDraggedIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+
+  const onDragStart = (i) => setDraggedIdx(i);
+  const onDragOver = (e, i) => { e.preventDefault(); setOverIdx(i); };
+  const onDrop = () => {
+    if (draggedIdx === null || overIdx === null || draggedIdx === overIdx) {
+      setDraggedIdx(null); setOverIdx(null); return;
+    }
+    const next = [...order];
+    const [moved] = next.splice(draggedIdx, 1);
+    next.splice(overIdx, 0, moved);
+    setOrder(next);
+    setDraggedIdx(null); setOverIdx(null);
+  };
+
+  const toggleGroupCollapse = (id) => setGroups(gs => gs.map(g => g.id === id ? { ...g, collapsed: !g.collapsed } : g));
+  const toggleVis = (id) => setElemData(d => ({ ...d, [id]: { ...d[id], visible: !d[id].visible } }));
+  const toggleLock = (id) => setElemData(d => ({ ...d, [id]: { ...d[id], locked: !d[id].locked } }));
+  const toggleMetrics = (id) => setElemData(d => ({ ...d, [id]: { ...d[id], inMetrics: !d[id].inMetrics } }));
+  const deleteLayer = (id) => {
+    setOrder(o => o.filter(it => !(it.kind === 'layer' && it.id === id)));
+    if (setElements) setElements(els => els.filter(e => e.id !== id));
+  };
+  const deleteGroup = (id) => {
+    // remove the group marker; layers underneath float up to previous group
+    setOrder(o => o.filter(it => !(it.kind === 'group' && it.id === id)));
+    setGroups(gs => gs.filter(g => g.id !== id));
+  };
+
+  const [addGroupOpen, setAddGroupOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const addGroup = () => {
+    if (!newGroupName.trim()) return;
+    const id = 'grp_' + Date.now();
+    const palette = ['#7C3AED','#DB2777','#0891B2','#BE185D','#0E7490','#65A30D'];
+    setGroups(gs => [...gs, { id, label: newGroupName, color: palette[gs.length % palette.length], collapsed: false }]);
+    setOrder(o => [...o, { kind: 'group', id }]);
+    setNewGroupName('');
+    setAddGroupOpen(false);
+  };
+
+  const groupMap = Object.fromEntries(groups.map(g => [g.id, g]));
+
+  // Compute visible items respecting group collapse
+  let curCollapsed = false;
+  const visibleItems = [];
+  order.forEach((item, i) => {
+    if (item.kind === 'group') {
+      const g = groupMap[item.id];
+      if (!g) return;
+      curCollapsed = g.collapsed;
+      visibleItems.push({ ...item, idx: i });
+    } else {
+      if (!curCollapsed) visibleItems.push({ ...item, idx: i });
+    }
+  });
+
+  const sty = {
+    groupRow: (color, isOver) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: T.elevated, cursor: 'pointer', userSelect: 'none', borderLeft: `3px solid ${color}`, borderTop: isOver ? `2px solid ${T.accent}` : '2px solid transparent' }),
+    groupLabel: (color) => ({ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color, flex: 1 }),
+    layerRow: (selected, locked, isOver) => ({ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px 4px 18px', background: selected ? T.accentSubtle : 'transparent', borderLeft: selected ? `2px solid ${T.accent}` : '2px solid transparent', borderTop: isOver ? `2px solid ${T.accent}` : '2px solid transparent', cursor: 'pointer', opacity: locked ? 0.6 : 1 }),
+    rowLabel: (selected) => ({ fontSize: 12, color: selected ? T.accent : T.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }),
+    iconBtn: { border: 'none', background: 'transparent', cursor: 'pointer', padding: 2, display: 'flex', color: T.textMuted, flexShrink: 0 },
+    handle: { cursor: 'grab', color: T.textMuted, display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.5 },
+    metricsCheck: (on) => ({ width: 12, height: 12, borderRadius: 2, border: `1.5px solid ${on ? T.accent : T.borderStrong}`, background: on ? T.accent : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }),
+  };
+
+  const Handle = () => (
+    <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor">
+      <circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/>
+      <circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/>
+      <circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/>
+    </svg>
+  );
+
+  return (
+    <ZoneHeader label="Layers" collapsed={collapsed} onToggle={onToggle}>
+      <div style={{ overflowY: 'auto', maxHeight: 280 }}>
+        {visibleItems.map(item => {
+          if (item.kind === 'group') {
+            const g = groupMap[item.id];
+            if (!g) return null;
+            // Count layers in this group
+            let count = 0;
+            for (let j = item.idx + 1; j < order.length; j++) {
+              if (order[j].kind === 'group') break;
+              count++;
+            }
+            const isOver = overIdx === item.idx && draggedIdx !== null && draggedIdx !== item.idx;
+            return (
+              <div key={item.id}
+                draggable
+                onDragStart={() => onDragStart(item.idx)}
+                onDragOver={(e) => onDragOver(e, item.idx)}
+                onDrop={onDrop}
+                onDragEnd={() => { setDraggedIdx(null); setOverIdx(null); }}
+                style={sty.groupRow(g.color, isOver)}
+                onClick={() => toggleGroupCollapse(item.id)}>
+                <Icon name={g.collapsed ? 'chevronRight' : 'chevronDown'} size={11} color={g.color}/>
+                <span style={sty.groupLabel(g.color)}>{g.label}</span>
+                <span style={{ fontSize: 10, color: T.textMuted, marginRight: 4 }}>{count}</span>
+                <button style={sty.iconBtn} title="Delete group" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete group "${g.label}"? Its layers will remain.`)) deleteGroup(item.id); }}>
+                  <Icon name="trash" size={11} color={T.textMuted}/>
+                </button>
+                <div style={sty.handle}><Handle/></div>
+              </div>
+            );
+          }
+          // Layer row
+          const el = elements.find(e => e.id === item.id);
+          if (!el) return null;
+          const d = elemData[el.id] || { visible: true, locked: false, inMetrics: true };
+          const isOver = overIdx === item.idx && draggedIdx !== null && draggedIdx !== item.idx;
+          return (
+            <div key={el.id}
+              draggable
+              onDragStart={() => onDragStart(item.idx)}
+              onDragOver={(e) => onDragOver(e, item.idx)}
+              onDrop={onDrop}
+              onDragEnd={() => { setDraggedIdx(null); setOverIdx(null); }}
+              style={sty.layerRow(selectedId === el.id, d.locked, isOver)}
+              onClick={() => onSelect(el)}>
+              <div style={sty.handle} onClick={(e) => e.stopPropagation()}><Handle/></div>
+              <span style={sty.rowLabel(selectedId === el.id)}>{el.label}</span>
+              <Tooltip label={d.inMetrics ? 'In metrics' : 'Excluded from metrics'} placement="bottom">
+                <div style={sty.metricsCheck(d.inMetrics)}
+                  onClick={(e) => { e.stopPropagation(); toggleMetrics(el.id); }}>
+                  {d.inMetrics && (
+                    <svg width="8" height="8" viewBox="0 0 8 8"><polyline points="1,4 3,6 7,2" stroke="#fff" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  )}
+                </div>
+              </Tooltip>
+              <button style={sty.iconBtn} onClick={(e) => { e.stopPropagation(); toggleVis(el.id); }}>
+                <Icon name={d.visible ? 'eye' : 'eyeOff'} size={12} color={d.visible ? T.textSec : T.textMuted}/>
+              </button>
+              <button style={sty.iconBtn} onClick={(e) => { e.stopPropagation(); toggleLock(el.id); }}>
+                <Icon name={d.locked ? 'lock' : 'unlock'} size={12} color={d.locked ? T.warning : T.textMuted}/>
+              </button>
+              <button style={sty.iconBtn} title="Delete layer" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete layer "${el.label}"?`)) deleteLayer(el.id); }}>
+                <Icon name="trash" size={12} color={T.textMuted}/>
+              </button>
+            </div>
+          );
+        })}
+        {/* Imported layers footer */}
+        <div style={{ borderTop: `2px solid ${T.border}`, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="file" size={12} color={T.textMuted}/>
+          <span style={{ fontSize: 12, color: T.textSec, fontStyle: 'italic', flex: 1 }}>Parcels_2024.shp</span>
+          <span style={{ fontSize: 9, color: T.textMuted, background: T.elevated, padding: '1px 5px', borderRadius: 3 }}>Read-only</span>
+        </div>
+      </div>
+      {/* Add group */}
+      <div style={{ borderTop: `1px solid ${T.border}`, padding: '6px 10px' }}>
+        {addGroupOpen ? (
+          <div style={{ display: 'flex', gap: 5 }}>
+            <input autoFocus value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addGroup(); if (e.key === 'Escape') { setAddGroupOpen(false); setNewGroupName(''); } }}
+              placeholder="Group / phase name…"
+              style={{ flex: 1, height: 26, padding: '0 8px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 5, background: T.elevated, color: T.text, outline: 'none' }}/>
+            <button onClick={addGroup} style={{ height: 26, padding: '0 10px', fontSize: 11, fontWeight: 600, borderRadius: 5, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer' }}>Add</button>
+            <button onClick={() => { setAddGroupOpen(false); setNewGroupName(''); }} style={{ height: 26, width: 26, borderRadius: 5, border: `1px solid ${T.border}`, background: 'transparent', color: T.textSec, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="x" size={12}/></button>
+          </div>
+        ) : (
+          <button onClick={() => setAddGroupOpen(true)} style={{ width: '100%', height: 26, fontSize: 11, border: `1px dashed ${T.border}`, borderRadius: 5, background: 'transparent', color: T.textSec, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            <Icon name="plus" size={12}/> Add Group / Phase
+          </button>
+        )}
+      </div>
+    </ZoneHeader>
+  );
+};
+
+// ── ZONE 5 — METRICS ────────────────────────────────────────────
+const MetricsZone = ({ collapsed, onToggle, elements }) => {
+  const phases = ['All', 'Existing', 'Phase 1', 'Phase 2', 'Phase 3'];
+  const [activePhase, setActivePhase] = useState('All');
+  const phaseColor = { 'Existing': '#94A3B8', 'Phase 1': '#2563EB', 'Phase 2': '#16A34A', 'Phase 3': '#D97706', 'All': T.accent };
+
+  const sets = {
+    'All': [
+      { label: 'Protected Bike Lane', value: '1,240 ft', color: '#16A34A' },
+      { label: 'New Sidewalk', value: '3,820 ft', color: '#2563EB' },
+      { label: 'Street Trees', value: '42 trees', color: '#15803D' },
+      { label: 'Green Coverage', value: '28%', color: '#22C55E' },
+      { label: 'Total Building GFA', value: '184,000 sf', color: '#334155' },
+      { label: 'Est. Residential Units', value: '~240 units', color: '#7C3AED' },
+      { label: 'Active Frontage', value: '620 ft', color: '#D97706' },
+      { label: 'Impervious Surface', value: '38,400 sq ft', color: '#94A3B8' },
+    ],
+    'Existing': [
+      { label: 'Existing Bike Lane', value: '0 ft', color: '#16A34A' },
+      { label: 'Existing Sidewalk', value: '1,200 ft', color: '#2563EB' },
+      { label: 'Street Trees', value: '8 trees', color: '#15803D' },
+      { label: 'Green Coverage', value: '14%', color: '#22C55E' },
+      { label: 'Active Frontage', value: '240 ft', color: '#D97706' },
+      { label: 'Impervious Surface', value: '52,000 sq ft', color: '#94A3B8' },
+    ],
+    'Phase 1': [
+      { label: 'Protected Bike Lane', value: '1,240 ft', color: '#16A34A' },
+      { label: 'New Sidewalk', value: '2,620 ft', color: '#2563EB' },
+      { label: 'Street Trees', value: '18 trees', color: '#15803D' },
+      { label: 'Green Coverage', value: '19%', color: '#22C55E' },
+      { label: 'Active Frontage', value: '380 ft', color: '#D97706' },
+      { label: 'Impervious Surface', value: '44,200 sq ft', color: '#94A3B8' },
+    ],
+    'Phase 2': [
+      { label: 'Protected Bike Lane', value: '1,240 ft', color: '#16A34A' },
+      { label: 'New Sidewalk', value: '3,820 ft', color: '#2563EB' },
+      { label: 'Street Trees', value: '42 trees', color: '#15803D' },
+      { label: 'Green Coverage', value: '24%', color: '#22C55E' },
+      { label: 'Building GFA', value: '84,000 sf', color: '#334155' },
+      { label: 'Est. Residential Units', value: '~90 units', color: '#7C3AED' },
+      { label: 'Active Frontage', value: '520 ft', color: '#D97706' },
+      { label: 'Impervious Surface', value: '40,800 sq ft', color: '#94A3B8' },
+    ],
+    'Phase 3': [
+      { label: 'Protected Bike Lane', value: '1,240 ft', color: '#16A34A' },
+      { label: 'New Sidewalk', value: '3,820 ft', color: '#2563EB' },
+      { label: 'Street Trees', value: '42 trees', color: '#15803D' },
+      { label: 'Green Coverage', value: '28%', color: '#22C55E' },
+      { label: 'Total Building GFA', value: '184,000 sf', color: '#334155' },
+      { label: 'Est. Residential Units', value: '~240 units', color: '#7C3AED' },
+      { label: 'Active Frontage', value: '620 ft', color: '#D97706' },
+      { label: 'Impervious Surface', value: '38,400 sq ft', color: '#94A3B8' },
+    ],
+  };
+  const metrics = sets[activePhase] || sets['All'];
+
+  return (
+    <ZoneHeader label="Metrics" collapsed={collapsed} onToggle={onToggle}>
+      <div style={{ display: 'flex', gap: 3, padding: '6px 10px 4px', flexWrap: 'wrap' }}>
+        {phases.map(p => (
+          <button key={p} onClick={() => setActivePhase(p)}
+            style={{ height: 22, padding: '0 8px', fontSize: 10, fontWeight: activePhase === p ? 700 : 500, borderRadius: 4,
+              border: `1px solid ${activePhase === p ? phaseColor[p] : T.border}`,
+              background: activePhase === p ? `${phaseColor[p]}18` : 'transparent',
+              color: activePhase === p ? phaseColor[p] : T.textSec, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {p}
+          </button>
+        ))}
+      </div>
+      {activePhase !== 'All' && (
+        <div style={{ padding: '2px 12px 4px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ width: 8, height: 8, borderRadius: 4, background: phaseColor[activePhase], flexShrink: 0 }}/>
+          <span style={{ fontSize: 10, color: T.textMuted }}>Cumulative through {activePhase}</span>
+        </div>
+      )}
+      <div style={{ padding: '4px 0 6px' }}>
+        {metrics.map((m, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px' }}>
+            <div style={{ width: 6, height: 6, borderRadius: 3, background: m.color, flexShrink: 0 }}/>
+            <span style={{ fontSize: 12, color: T.textSec, flex: 1 }}>{m.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{m.value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '6px 12px 8px', fontSize: 10, color: T.textMuted, borderTop: `1px solid ${T.border}` }}>
+        Updates as you draw · Use ☑ in Layers to include / exclude
+      </div>
+    </ZoneHeader>
+  );
+};
+
+// ── MAP ORIENTATION CONTROL ─────────────────────────────────────
+const MapOrientationControl = ({ rotation, setRotation }) => {
+  const active = rotation !== 0;
+  return (
+    <div style={{
+      position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+      background: T.panel, border: `1px solid ${T.border}`, borderLeft: active ? `3px solid ${T.warning}` : `1px solid ${T.border}`,
+      borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px',
+      boxShadow: '0 2px 12px rgba(15,23,42,0.10)', zIndex: 20
+    }}>
+      {/* Compass rose */}
+      <div style={{ transform: `rotate(${-rotation}deg)`, transition: 'transform 150ms', display: 'flex' }}>
+        <Icon name="compass" size={18} color={active ? T.warning : T.textSec}/>
+      </div>
+      <button style={{ width: 22, height: 22, border: `1px solid ${T.border}`, borderRadius: 4, background: T.elevated, cursor: 'pointer', fontSize: 12, color: T.textSec, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={() => setRotation(r => Math.max(0, r - 1))}>−</button>
+      <input type="number" value={rotation} min={0} max={359}
+        onChange={e => setRotation(Math.min(359, Math.max(0, +e.target.value)))}
+        style={{ width: 44, height: 24, textAlign: 'center', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 4, background: T.elevated, color: T.text, outline: 'none' }}/>
+      <span style={{ fontSize: 10, color: T.textMuted }}>°</span>
+      <button style={{ width: 22, height: 22, border: `1px solid ${T.border}`, borderRadius: 4, background: T.elevated, cursor: 'pointer', fontSize: 12, color: T.textSec, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={() => setRotation(r => Math.min(359, r + 1))}>+</button>
+      {active && (
+        <button onClick={() => setRotation(0)}
+          style={{ height: 22, padding: '0 7px', fontSize: 10, fontWeight: 600, border: `1px solid ${T.warning}`, borderRadius: 4, background: 'transparent', color: T.warning, cursor: 'pointer' }}>N</button>
+      )}
+    </div>
+  );
+};
+
+// ── SHADOW ANALYSIS PANEL ────────────────────────────────────────
+const ShadowPanel = ({ onClose }) => {
+  const [date, setDate] = useState('2026-05-03');
+  const [hour, setHour] = useState(12);
+  const [playing, setPlaying] = useState(false);
+  const [cumulative, setCumulative] = useState(false);
+  const [pos, setPos] = useState({ x: window.innerWidth - 336 - 260, y: 16 });
+  const dragRef = useRef(null);
+
+  const onMouseDown = (e) => {
+    const startX = e.clientX, startY = e.clientY;
+    const origX = pos.x, origY = pos.y;
+    const onMove = (ev) => setPos({ x: origX + (ev.clientX - startX), y: Math.max(0, origY + (ev.clientY - startY)) });
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const timeLabel = h => {
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const disp = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return `${disp}:00 ${ampm}`;
+  };
+
+  return (
+    <div style={{ position: 'absolute', left: pos.x, top: pos.y, width: 260, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: '0 8px 32px rgba(15,23,42,0.12)', zIndex: 30, overflow: 'hidden' }} className="fade-enter">
+      <div onMouseDown={onMouseDown} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: `1px solid ${T.border}`, cursor: 'grab', userSelect: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="sun" size={16} color="#D97706"/>
+          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Shadow Analysis</span>
+        </div>
+        <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: T.textMuted }}><Icon name="x" size={14}/></button>
+      </div>
+      <div style={{ padding: 14 }}>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: T.textMuted, marginBottom: 4 }}>Date</div>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            style={{ width: '100%', height: 28, padding: '0 8px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 6, background: T.elevated, color: T.text, outline: 'none' }}/>
+          <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap' }}>
+            {[['Jun 21', '2026-06-21'], ['Dec 21', '2026-12-21'], ['Mar 20', '2026-03-20'], ['Sep 22', '2026-09-22']].map(([label, val]) => (
+              <button key={val} onClick={() => setDate(val)}
+                style={{ height: 22, padding: '0 7px', fontSize: 10, fontWeight: 500, border: `1px solid ${date === val ? T.accent : T.border}`, borderRadius: 4, background: date === val ? T.accentSubtle : 'transparent', color: date === val ? T.accent : T.textSec, cursor: 'pointer' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: T.textMuted }}>Time</div>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#D97706' }}>{timeLabel(hour)}</span>
+          </div>
+          <input type="range" min={6} max={20} value={hour} onChange={e => setHour(+e.target.value)} className="amber" style={{ width: '100%' }}/>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: T.textMuted, marginTop: 2 }}>
+            <span>6 AM</span><span>Noon</span><span>8 PM</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <button onClick={() => setPlaying(!playing)}
+            style={{ flex: 1, height: 30, fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${T.accent}`, background: playing ? T.accent : T.accentSubtle, color: playing ? '#fff' : T.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            {playing ? '⏸ Pause' : '▶ Animate Day'}
+          </button>
+          <select style={{ height: 30, padding: '0 6px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 6, background: T.elevated, color: T.text, outline: 'none' }}>
+            <option>1×</option><option>5×</option><option>10×</option>
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: T.text }}>Cumulative shadow map</span>
+          <div onClick={() => setCumulative(!cumulative)} style={{ width: 28, height: 16, borderRadius: 8, background: cumulative ? T.accent : T.border, position: 'relative', cursor: 'pointer' }}>
+            <div style={{ width: 12, height: 12, borderRadius: 6, background: '#fff', position: 'absolute', top: 2, left: cumulative ? 14 : 2, transition: 'left 150ms', boxShadow: '0 1px 3px rgba(0,0,0,.2)' }}/>
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 8 }}>📍 37.7749°N, 122.4194°W (auto-detected)</div>
+        <div style={{ display: 'flex', gap: 5 }}>
+          <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: 'transparent', color: T.textSec, cursor: 'pointer' }}>Shadow Report PDF</button>
+          <button style={{ flex: 1, height: 26, fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 5, background: 'transparent', color: T.textSec, cursor: 'pointer' }}>Export PNG</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── SHARE MODAL ─────────────────────────────────────────────────
+const ShareModal = ({ onClose }) => {
+  const [tab, setTab] = useState('collaborate');
+  const [copied, setCopied] = useState(false);
+  const copyLink = () => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const links = {
+    collaborate: 'https://ump.app/workspace/dX92k?collab=pQ8rT2m',
+    view: 'https://ump.app/view/dX92k?v=pQ8rT2m-view',
+  };
+  const s = {
+    overlay: { position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
+    modal: { background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: '0 8px 32px rgba(15,23,42,0.12)', width: 480, overflow: 'hidden' },
+    header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: `1px solid ${T.border}` },
+    title: { fontSize: 16, fontWeight: 600, color: T.text },
+    tabs: { display: 'flex', borderBottom: `1px solid ${T.border}` },
+    tab: (active) => ({ flex: 1, height: 40, fontSize: 13, fontWeight: active ? 600 : 400, border: 'none', background: 'transparent', color: active ? T.accent : T.textSec, borderBottom: active ? `2px solid ${T.accent}` : '2px solid transparent', cursor: 'pointer', marginBottom: -1 }),
+    body: { padding: '20px 20px 16px' },
+    desc: { fontSize: 13, color: T.textSec, marginBottom: 14, lineHeight: 1.5 },
+    linkRow: { display: 'flex', gap: 6 },
+    linkInp: { flex: 1, height: 34, padding: '0 10px', fontSize: 12, border: `1px solid ${T.border}`, borderRadius: 6, background: T.elevated, color: T.text, fontFamily: 'monospace', outline: 'none' },
+    copyBtn: (done) => ({ height: 34, padding: '0 14px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', background: done ? T.success : T.accent, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }),
+    footer: { padding: '12px 20px', borderTop: `1px solid ${T.border}`, display: 'flex', justifyContent: 'flex-end' },
+    closeBtn: { height: 32, padding: '0 14px', fontSize: 13, fontWeight: 500, borderRadius: 6, border: `1px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer' },
+  };
+  return (
+    <div style={s.overlay} onClick={onClose}>
+      <div style={s.modal} onClick={e => e.stopPropagation()} className="fade-enter">
+        <div style={s.header}>
+          <span style={s.title}>Share Plan</span>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: T.textMuted }}><Icon name="x" size={16}/></button>
+        </div>
+        <div style={s.tabs}>
+          <button style={s.tab(tab === 'collaborate')} onClick={() => setTab('collaborate')}>⚙ Collaborate (Edit)</button>
+          <button style={s.tab(tab === 'view')} onClick={() => setTab('view')}>👁 View-Only Link</button>
+        </div>
+        <div style={s.body}>
+          <p style={s.desc}>
+            {tab === 'collaborate'
+              ? 'Anyone with this link can view and edit this plan. They must sign in to make changes.'
+              : 'Anyone with this link can view this plan without signing in. They cannot edit.'}
+          </p>
+          <div style={s.linkRow}>
+            <input style={s.linkInp} value={links[tab]} readOnly/>
+            <button style={s.copyBtn(copied)} onClick={copyLink}>
+              {copied ? <><Icon name="check" size={13} color="#fff"/> Copied!</> : <><Icon name="copy" size={13} color="#fff"/> Copy</>}
+            </button>
+          </div>
+        </div>
+        <div style={s.footer}>
+          <button style={s.closeBtn} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── METRICS PANEL ───────────────────────────────────────────────
+const MetricsPanel = ({ onClose }) => {
+  const metrics = [
+    { label: 'Protected Bike Lane', value: '1,240 ft', color: '#16A34A', icon: 'bike' },
+    { label: 'New Sidewalk', value: '3,820 ft', color: '#2563EB', icon: 'measure' },
+    { label: 'Street Trees', value: '42 trees', color: '#15803D', icon: 'tree' },
+    { label: 'Green Coverage', value: '28%', color: '#22C55E', icon: 'map' },
+    { label: 'Total Building GFA', value: '184,000 sf', color: '#334155', icon: 'building' },
+    { label: 'Est. Residential Units', value: '~240 units', color: '#7C3AED', icon: 'building' },
+    { label: 'Active Frontage', value: '620 ft', color: '#D97706', icon: 'road' },
+    { label: 'Impervious Surface', value: '54%', color: '#94A3B8', icon: 'grid' },
+  ];
+  return (
+    <div style={{ position: 'absolute', top: 16, left: 60, width: 240, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: '0 8px 32px rgba(15,23,42,0.10)', zIndex: 30, overflow: 'hidden' }} className="fade-enter">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: `1px solid ${T.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="barChart" size={15} color={T.accent}/>
+          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Live Metrics</span>
+        </div>
+        <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: T.textMuted }}><Icon name="x" size={14}/></button>
+      </div>
+      <div style={{ padding: '8px 0' }}>
+        {metrics.map((m, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px' }}>
+            <div style={{ width: 6, height: 6, borderRadius: 3, background: m.color, flexShrink: 0 }}/>
+            <span style={{ fontSize: 12, color: T.textSec, flex: 1 }}>{m.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{m.value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '8px 14px', borderTop: `1px solid ${T.border}`, fontSize: 10, color: T.textMuted }}>Updates as you draw · All elements on canvas</div>
+    </div>
+  );
+};
+
+// ── ZOOM CONTROLS ───────────────────────────────────────────────
+const ZoomControls = ({ mode3D }) => (
+  <div style={{ position: 'absolute', bottom: 60, right: 12, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 20 }}>
+    {mode3D && (
+      <Tooltip label="3D Active — Ctrl+drag to tilt" placement="left">
+        <div style={{ background: '#7C3AED', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, textAlign: 'center', letterSpacing: '0.05em' }}>3D</div>
+      </Tooltip>
+    )}
+    <button style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 6, background: T.panel, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>
+      <Icon name="zoomIn" size={15}/>
+    </button>
+    <button style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 6, background: T.panel, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>
+      <Icon name="zoomOut" size={15}/>
+    </button>
+    <button style={{ width: 32, height: 32, border: `1px solid ${T.border}`, borderRadius: 6, background: T.panel, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>
+      <Icon name="maximize" size={15}/>
+    </button>
+  </div>
+);
+
+// ── STATUS BAR ──────────────────────────────────────────────────
+const StatusBar = () => (
+  <div style={{ height: 28, background: T.panel, borderTop: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, gap: 16, flexShrink: 0, zIndex: 10 }}>
+    <span style={{ fontFamily: 'monospace', fontSize: 11, color: T.textMuted }}>37.7749° N, 122.4194° W</span>
+    <span style={{ fontFamily: 'monospace', fontSize: 11, color: T.textMuted }}>|</span>
+    <span style={{ fontSize: 11, color: T.textMuted }}>Zoom 16 · Scale 1" = 100 ft</span>
+    <span style={{ fontSize: 11, color: T.textMuted }}>|</span>
+    <span style={{ fontSize: 11, color: T.textMuted }}>14 elements · 3 phases</span>
+    <div style={{ flex: 1 }}/>
+    <span style={{ fontSize: 11, color: T.textMuted }}>⌘Z Undo · V Select · P Pen · H Pan</span>
+    <span style={{ fontSize: 11, color: T.textMuted }}>|</span>
+    <span style={{ fontSize: 11, color: T.textMuted }}>Mapbox GL JS © Mapbox © OSM</span>
+  </div>
+);
+
+// ── GUEST BANNER ────────────────────────────────────────────────
+const GuestBanner = ({ onDismiss }) => (
+  <div style={{ height: 36, background: '#1E3A5F', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexShrink: 0 }}>
+    <span style={{ fontSize: 12, color: '#BFDBFE' }}>Create a free account to save your work.</span>
+    <button style={{ height: 24, padding: '0 12px', fontSize: 11, fontWeight: 600, borderRadius: 4, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer' }}>Save My Work</button>
+    <button onClick={onDismiss} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#BFDBFE', marginLeft: 8 }}><Icon name="x" size={13} color="#BFDBFE"/></button>
+  </div>
+);
+
+// ── WELCOME TOOLTIP ──────────────────────────────────────────────
+const WelcomeTooltip = ({ onDismiss }) => (
+  <div style={{ position: 'absolute', left: 60, top: 12, width: 260, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, boxShadow: '0 8px 32px rgba(15,23,42,0.12)', padding: 14, zIndex: 50 }} className="fade-enter">
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <div style={{ width: 32, height: 32, background: T.accentSubtle, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon name="info" size={16} color={T.accent}/>
+      </div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4 }}>Welcome to Urban Designer</div>
+        <div style={{ fontSize: 12, color: T.textSec, lineHeight: 1.5 }}>Pick a drawing tool to start, or choose an element from the right panel. No account needed.</div>
+      </div>
+    </div>
+    <button onClick={onDismiss} style={{ marginTop: 10, width: '100%', height: 28, fontSize: 12, fontWeight: 500, borderRadius: 6, border: `1px solid ${T.border}`, background: T.elevated, cursor: 'pointer', color: T.textSec }}>Got it</button>
+  </div>
+);
+
+// ── RIGHT PANEL ─────────────────────────────────────────────────
+const RightPanel = ({ selectedElement, elements, setElements, onSelect, selectedId }) => {
+  const [zones, setZones] = useState({ style: false, library: true, details: true, layers: true, metrics: true });
+  const toggleZone = (z) => setZones(p => ({ ...p, [z]: !p[z] }));
+  return (
+    <div style={{ width: 320, minWidth: 320, background: T.panel, borderLeft: `1px solid ${T.border}`, display: 'flex', flexDirection: 'column', overflowY: 'auto', zIndex: 10, flexShrink: 0 }}>
+      <StyleZone collapsed={zones.style} onToggle={() => toggleZone('style')}/>
+      <ElementLibrary collapsed={zones.library} onToggle={() => toggleZone('library')}/>
+      <ElementDetails collapsed={zones.details} onToggle={() => toggleZone('details')} selectedElement={selectedElement}/>
+      <LayersZone collapsed={zones.layers} onToggle={() => toggleZone('layers')} elements={elements} setElements={setElements} selectedId={selectedId} onSelect={onSelect}/>
+      <MetricsZone collapsed={zones.metrics} onToggle={() => toggleZone('metrics')} elements={elements}/>
+    </div>
+  );
+};
+
+// ── MAIN WORKSPACE ──────────────────────────────────────────────
+const Workspace = ({ onNavigate }) => {
+  const [activeTool, setActiveTool] = useState('select');
+  const [canvasSearch, setCanvasSearch] = useState('');
+  const [showCanvasSearch, setShowCanvasSearch] = useState(false);
+  const [projectName, setProjectName] = useState('Downtown Mobility Study');
+  const [savedState, setSavedState] = useState('saved');
+  const [nightMode, setNightMode] = useState(false);
+  const [mode3D, setMode3D] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [showShadow, setShowShadow] = useState(false);
+  const [showMetrics, setShowMetrics] = useState(false);
+  const [showGuestBanner, setShowGuestBanner] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [rotation, setRotation] = useState(0);
+  const [elements, setElements] = useState(SAMPLE_ELEMENTS);
+  const [selectedId, setSelectedId] = useState('e3');
+
+  const selectedElement = elements.find(e => e.id === selectedId) || null;
+
+  const handleSelectInLayer = (el) => {
+    setSelectedId(el.id);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.bg }}>
+      {showGuestBanner && <GuestBanner onDismiss={() => setShowGuestBanner(false)}/>}
+      <TopBar
+        projectName={projectName} setProjectName={setProjectName}
+        savedState={savedState} nightMode={nightMode} setNightMode={setNightMode}
+        mode3D={mode3D} setMode3D={setMode3D}
+        onShare={() => setShowShare(true)} onShowShadow={() => setShowShadow(!showShadow)}
+        showMetrics={showMetrics} setShowMetrics={setShowMetrics}
+        onNavigate={onNavigate}
+      />
+      {/* Main workspace body */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+        <ToolStrip activeTool={activeTool} onToolSelect={setActiveTool}/>
+        {/* Canvas area */}
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#1a2035' }}>
+          <MockSatelliteMap nightMode={nightMode}/>
+
+          {/* Canvas search */}
+          <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {showCanvasSearch ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, padding: '4px 8px', boxShadow: '0 4px 14px rgba(15,23,42,0.18)' }}>
+                <Icon name="search" size={14} color={T.textMuted}/>
+                <input autoFocus value={canvasSearch} onChange={e => setCanvasSearch(e.target.value)} placeholder="Search address or location…" style={{ width: 240, height: 26, border: 'none', outline: 'none', fontSize: 12, color: T.text, background: 'transparent' }}/>
+                <button onClick={() => { setShowCanvasSearch(false); setCanvasSearch(''); }} style={{ width: 22, height: 22, border: 'none', background: 'transparent', cursor: 'pointer', color: T.textMuted, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="x" size={12}/>
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowCanvasSearch(true)} style={{ width: 36, height: 36, borderRadius: 8, border: `1px solid ${T.border}`, background: T.panel, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(15,23,42,0.14)' }} title="Search canvas (⌘K)">
+                <Icon name="search" size={15} color={T.textSec}/>
+              </button>
+            )}
+          </div>
+
+          {/* Snap indicator demo */}
+          <div style={{ position: 'absolute', left: '36%', top: '42%', width: 12, height: 12, borderRadius: '50%', border: `2px solid ${T.accent}`, background: 'transparent', pointerEvents: 'none', zIndex: 5 }}/>
+
+          {/* Canvas overlays */}
+          <div style={{ position: 'absolute', bottom: 40, left: 14, zIndex: 10, display: 'none' }}>
+            <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 10, fontFamily: 'monospace', color: T.textSec, marginBottom: 4 }}>
+              ←—— 200 ft ——→
+            </div>
+            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)' }}>1" = 100 ft</div>
+          </div>
+
+          {/* Compass rose */}
+          <div style={{ position: 'absolute', bottom: 60, left: 14, zIndex: 10, transform: `rotate(${-rotation}deg)`, transition: 'transform 150ms' }}>
+            <Icon name="compass" size={28} color="rgba(255,255,255,0.5)" strokeWidth={1}/>
+          </div>
+
+          {showWelcome && <WelcomeTooltip onDismiss={() => setShowWelcome(false)}/>}
+          {showShadow && <ShadowPanel onClose={() => setShowShadow(false)}/>}
+          <MapOrientationControl rotation={rotation} setRotation={setRotation}/>
+          <ZoomControls mode3D={mode3D}/>
+        </div>
+        <RightPanel
+          selectedElement={selectedElement}
+          elements={elements}
+          setElements={setElements}
+          selectedId={selectedId}
+          onSelect={handleSelectInLayer}
+        />
+      </div>
+      <StatusBar/>
+      {showShare && <ShareModal onClose={() => setShowShare(false)}/>}
+    </div>
+  );
+};
+
+// ── LANDING PAGE ────────────────────────────────────────────────
+const LandingPage = ({ onNavigate }) => {
+  const s = {
+    page: { minHeight: '100vh', background: T.panel, overflowY: 'auto' },
+    nav: { height: 56, display: 'flex', alignItems: 'center', paddingLeft: 40, paddingRight: 40, borderBottom: `1px solid ${T.border}`, background: T.panel, position: 'sticky', top: 0, zIndex: 50 },
+    logo: { display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' },
+    logoMark: { width: 32, height: 32, background: '#A3B57A', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, fontFamily: "'Inter Tight', sans-serif" },
+    logoName: { fontSize: 16, fontWeight: 700, color: T.text, fontFamily: "'Inter Tight', sans-serif", letterSpacing: '-0.02em' },
+    navRight: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 },
+    loginLink: { fontSize: 13, color: T.textSec, cursor: 'pointer', padding: '6px 12px', borderRadius: 6, border: 'none', background: 'transparent' },
+    signupBtn: { height: 34, padding: '0 18px', fontSize: 13, fontWeight: 600, borderRadius: 7, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer' },
+    hero: { maxWidth: 900, margin: '0 auto', padding: '100px 40px 80px', textAlign: 'center' },
+    eyebrow: { fontSize: 12, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: T.accent, marginBottom: 16 },
+    headline: { fontSize: 56, fontWeight: 700, color: T.text, lineHeight: 1.08, letterSpacing: '-0.03em', marginBottom: 20, fontFamily: "'Inter Tight', sans-serif", textWrap: 'balance' },
+    subline: { fontSize: 20, color: T.textSec, lineHeight: 1.5, maxWidth: 560, margin: '0 auto 36px', textWrap: 'balance' },
+    ctaRow: { display: 'flex', gap: 12, justifyContent: 'center', marginBottom: 60 },
+    primaryCta: { height: 48, padding: '0 28px', fontSize: 15, fontWeight: 700, borderRadius: 9, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 },
+    secondaryCta: { height: 48, padding: '0 28px', fontSize: 15, fontWeight: 600, borderRadius: 9, border: `1.5px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer' },
+    canvasPreview: { maxWidth: 1000, margin: '0 auto', padding: '0 24px 80px' },
+    previewWrap: { borderRadius: 16, overflow: 'hidden', border: `1px solid ${T.border}`, boxShadow: '0 24px 80px rgba(15,23,42,0.12)', aspectRatio: '16/9', background: '#1a2035', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', cursor: 'pointer' },
+    previewLabel: { position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', background: T.accent, color: '#fff', fontSize: 13, fontWeight: 600, padding: '8px 18px', borderRadius: 8, cursor: 'pointer' },
+    featuresSection: { background: T.bg, padding: '80px 40px', borderTop: `1px solid ${T.border}` },
+    featuresGrid: { maxWidth: 900, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 32 },
+    featureCard: { padding: 24, background: T.panel, borderRadius: 12, border: `1px solid ${T.border}` },
+    featureIcon: { width: 40, height: 40, borderRadius: 10, background: T.accentSubtle, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    featureTitle: { fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 8 },
+    featureDesc: { fontSize: 13, color: T.textSec, lineHeight: 1.6 },
+    sectionLabel: { textAlign: 'center', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: T.textMuted, marginBottom: 10 },
+    sectionTitle: { textAlign: 'center', fontSize: 32, fontWeight: 700, color: T.text, marginBottom: 48, fontFamily: "'Inter Tight', sans-serif", letterSpacing: '-0.02em' },
+    footer: { padding: '32px 40px', borderTop: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: T.panel },
+    footerLinks: { display: 'flex', gap: 20 },
+    footerLink: { fontSize: 12, color: T.textMuted, cursor: 'pointer' },
+  };
+
+  const features = [
+    { icon: 'road', title: 'Draw on Real Satellite Maps', desc: 'Streets, buildings, and landscape elements rendered directly on Mapbox satellite imagery. Your work, in real context.' },
+    { icon: 'layers', title: 'Rich Element Library', desc: 'From protected bike lanes to FBC transect zones — 200+ urban design elements with smart defaults and real-world dimensions.' },
+    { icon: 'share', title: 'Share Instantly', desc: 'Collaborate with teammates or share a view-only link with the public. No account required to view.' },
+    { icon: 'cube3d', title: '3D & Shadow Analysis', desc: 'Extrude buildings, orbit in 3D, and analyze shadow impacts at any date and time with solar calculations.' },
+    { icon: 'moon', title: 'Night Mode', desc: 'Visualize lighting plans at night. Street lights and festoon lighting glow with realistic halos against the dark map.' },
+    { icon: 'download', title: 'Professional Exports', desc: 'Export to PNG, PDF with title blocks, GeoJSON, KMZ, and SVG at standard engineering scales. Print-ready.' },
+  ];
+
+  return (
+    <div style={s.page}>
+      <nav style={s.nav}>
+        <div style={s.logo}>
+          <div style={s.logoMark}>UD</div>
+          <span style={s.logoName}>Urban Designer</span>
+        </div>
+        <div style={s.navRight}>
+          <button style={s.loginLink} onClick={() => onNavigate('login')}>Log In</button>
+          <button style={s.signupBtn} onClick={() => onNavigate('signup')}>Sign Up Free</button>
+        </div>
+      </nav>
+      <div style={s.hero}>
+        <div style={s.eyebrow}>For Urban Designers, Planners & Communities</div>
+        <h1 style={s.headline}>Draw cities.<br/>Share ideas.<br/>Plan better.</h1>
+        <p style={s.subline}>Urban Designer lets anyone draw streets, buildings, and urban elements on a real satellite map — and share the result instantly.</p>
+        <div style={s.ctaRow}>
+          <button style={s.primaryCta} onClick={() => onNavigate('workspace')}>
+            Start Planning <Icon name="arrowRight" size={16} color="#fff" strokeWidth={2.5}/>
+          </button>
+          <button style={s.secondaryCta} onClick={() => onNavigate('signup')}>Sign Up Free</button>
+        </div>
+      </div>
+      {/* Canvas preview */}
+      <div style={s.canvasPreview}>
+        <div style={s.previewWrap} onClick={() => onNavigate('workspace')}>
+          <MockSatelliteMap nightMode={false}/>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: 'rgba(255,255,255,0.12)', borderRadius: 12, padding: '12px 20px', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              <span style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>▶ Open Workspace</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Features */}
+      <div style={s.featuresSection}>
+        <div style={s.sectionLabel}>Capabilities</div>
+        <div style={s.sectionTitle}>Everything you need to plan and present</div>
+        <div style={s.featuresGrid}>
+          {features.map((f, i) => (
+            <div key={i} style={s.featureCard}>
+              <div style={s.featureIcon}><Icon name={f.icon} size={18} color={T.accent}/></div>
+              <div style={s.featureTitle}>{f.title}</div>
+              <div style={s.featureDesc}>{f.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <footer style={s.footer}>
+        <div style={{ fontSize: 13, color: T.textMuted }}>© 2026 Urban Designer</div>
+        <div style={s.footerLinks}>
+          {['Terms', 'Privacy', 'Contact'].map(l => <span key={l} style={s.footerLink}>{l}</span>)}
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+// ── AUTH PAGES ───────────────────────────────────────────────────
+const AuthPage = ({ mode, onNavigate }) => {
+  const isLogin = mode === 'login';
+  const s = {
+    page: { minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 },
+    card: { background: T.panel, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: '0 8px 32px rgba(15,23,42,0.08)', width: '100%', maxWidth: 400, padding: '36px 32px' },
+    logo: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 28 },
+    logoMark: { width: 44, height: 44, background: '#A3B57A', borderRadius: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 18, fontFamily: "'Inter Tight', sans-serif" },
+    logoName: { fontSize: 18, fontWeight: 700, color: T.text, fontFamily: "'Inter Tight', sans-serif" },
+    title: { fontSize: 22, fontWeight: 700, color: T.text, textAlign: 'center', marginBottom: 6, fontFamily: "'Inter Tight', sans-serif" },
+    sub: { fontSize: 13, color: T.textSec, textAlign: 'center', marginBottom: 28 },
+    label: { display: 'block', fontSize: 12, fontWeight: 600, color: T.textSec, marginBottom: 6 },
+    inp: { width: '100%', height: 38, padding: '0 12px', fontSize: 13, border: `1px solid ${T.border}`, borderRadius: 7, background: T.elevated, color: T.text, outline: 'none', marginBottom: 14, display: 'block' },
+    btn: { width: '100%', height: 42, fontSize: 14, fontWeight: 700, borderRadius: 8, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer', marginTop: 4 },
+    divider: { display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0' },
+    divLine: { flex: 1, height: 1, background: T.border },
+    divText: { fontSize: 11, color: T.textMuted },
+    switch: { textAlign: 'center', fontSize: 13, color: T.textSec, marginTop: 20 },
+    link: { color: T.accent, fontWeight: 600, cursor: 'pointer' },
+  };
+  return (
+    <div style={s.page}>
+      <div style={s.card}>
+        <div style={s.logo}>
+          <div style={s.logoMark}>UD</div>
+          <span style={s.logoName}>Urban Designer</span>
+        </div>
+        <h2 style={s.title}>{isLogin ? 'Welcome back' : 'Create your account'}</h2>
+        <p style={s.sub}>{isLogin ? 'Sign in to your projects' : 'Free forever. No credit card required.'}</p>
+        {!isLogin && (
+          <>
+            <label style={s.label}>Name</label>
+            <input style={s.inp} placeholder="Your name" type="text"/>
+          </>
+        )}
+        <label style={s.label}>Email</label>
+        <input style={s.inp} placeholder="you@example.com" type="email"/>
+        <label style={s.label}>Password</label>
+        <input style={s.inp} placeholder={isLogin ? 'Your password' : 'Create a password'} type="password"/>
+        {isLogin && <div style={{ textAlign: 'right', marginTop: -10, marginBottom: 14 }}><span style={s.link} onClick={() => onNavigate('reset')}>Forgot password?</span></div>}
+        <button style={s.btn} onClick={() => onNavigate('workspace')}>{isLogin ? 'Sign In' : 'Create Account'}</button>
+        <div style={s.switch}>
+          {isLogin ? <>No account? <span style={s.link} onClick={() => onNavigate('signup')}>Sign Up Free</span></>
+            : <>Already have an account? <span style={s.link} onClick={() => onNavigate('login')}>Sign In</span></>}
+        </div>
+        <div style={{ textAlign: 'center', marginTop: 10, fontSize: 12, color: T.textMuted, cursor: 'pointer' }} onClick={() => onNavigate('workspace')}>
+          Continue as guest →
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── PROJECT DASHBOARD ────────────────────────────────────────────
+const Dashboard = ({ onNavigate }) => {
+  const projects = [
+    { id: 1, name: 'Downtown Mobility Study', date: 'May 3, 2026', thumb: '#1D4ED8' },
+    { id: 2, name: 'Riverside Trail Corridor', date: 'Apr 28, 2026', thumb: '#15803D' },
+    { id: 3, name: 'Oak Street Redesign', date: 'Apr 22, 2026', thumb: '#7C3AED' },
+    { id: 4, name: 'Transit-Oriented Dev. Plan', date: 'Apr 15, 2026', thumb: '#DC2626' },
+    { id: 5, name: 'Park District Master Plan', date: 'Apr 10, 2026', thumb: '#D97706' },
+  ];
+  const [search, setSearch] = useState('');
+  const [menuOpen, setMenuOpen] = useState(null);
+
+  const s = {
+    page: { minHeight: '100vh', background: T.bg, display: 'flex', flexDirection: 'column' },
+    nav: { height: 56, background: T.panel, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', paddingLeft: 28, paddingRight: 28, gap: 16, flexShrink: 0 },
+    logo: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' },
+    logoMark: { width: 30, height: 30, background: '#A3B57A', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 12, fontFamily: "'Inter Tight', sans-serif" },
+    body: { flex: 1, maxWidth: 1080, margin: '0 auto', padding: '40px 28px', width: '100%' },
+    pageTitle: { fontSize: 26, fontWeight: 700, color: T.text, marginBottom: 6, fontFamily: "'Inter Tight', sans-serif" },
+    pageSub: { fontSize: 13, color: T.textSec, marginBottom: 28 },
+    toolbar: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 28 },
+    newBtn: { height: 38, padding: '0 18px', fontSize: 13, fontWeight: 700, borderRadius: 7, border: 'none', background: T.accent, color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
+    searchWrap: { position: 'relative', flex: 1, maxWidth: 320 },
+    searchInp: { width: '100%', height: 36, padding: '0 10px 0 32px', fontSize: 13, border: `1px solid ${T.border}`, borderRadius: 7, background: T.panel, outline: 'none', color: T.text },
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 },
+    card: (hover) => ({ background: T.panel, borderRadius: 12, border: `1px solid ${hover ? T.borderStrong : T.border}`, overflow: 'hidden', cursor: 'pointer', transition: 'border-color 100ms, box-shadow 100ms', boxShadow: hover ? '0 4px 16px rgba(15,23,42,0.08)' : 'none' }),
+    thumb: (color) => ({ height: 130, background: color, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }),
+    cardBody: { padding: '12px 14px' },
+    cardName: { fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 3 },
+    cardDate: { fontSize: 11, color: T.textMuted },
+    cardMenu: { position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 6, background: 'rgba(0,0,0,0.4)', border: 'none', cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    avatar: { width: 32, height: 32, borderRadius: '50%', background: '#DDD6FE', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#5B21B6', marginLeft: 'auto', cursor: 'pointer' },
+  };
+
+  const [hoverCard, setHoverCard] = useState(null);
+
+  return (
+    <div style={s.page}>
+      <nav style={s.nav}>
+        <div style={s.logo} onClick={() => onNavigate('landing')}>
+          <div style={s.logoMark}>UD</div>
+          <span style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "'Inter Tight', sans-serif" }}>Urban Designer</span>
+        </div>
+        <div style={{ flex: 1 }}/>
+        <div style={s.avatar}>JD</div>
+      </nav>
+      <div style={s.body}>
+        <div style={s.pageTitle}>My Projects</div>
+        <div style={s.pageSub}>5 projects · 23 of 100 used</div>
+        <div style={s.toolbar}>
+          <button style={s.newBtn} onClick={() => onNavigate('workspace')}>
+            <Icon name="plus" size={15} color="#fff" strokeWidth={2.5}/> New Project
+          </button>
+          <div style={s.searchWrap}>
+            <div style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }}>
+              <Icon name="search" size={13} color={T.textMuted}/>
+            </div>
+            <input style={s.searchInp} placeholder="Search projects…" value={search} onChange={e => setSearch(e.target.value)}/>
+          </div>
+        </div>
+        <div style={s.grid}>
+          {projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase())).map(p => (
+            <div key={p.id}
+              style={s.card(hoverCard === p.id)}
+              onMouseEnter={() => setHoverCard(p.id)}
+              onMouseLeave={() => setHoverCard(null)}
+              onClick={() => onNavigate('workspace')}>
+              <div style={s.thumb(p.thumb)}>
+                <MockSatelliteMap nightMode={false}/>
+                <button style={s.cardMenu} onClick={e => { e.stopPropagation(); setMenuOpen(menuOpen === p.id ? null : p.id); }}>⋯</button>
+              </div>
+              <div style={s.cardBody}>
+                <div style={s.cardName}>{p.name}</div>
+                <div style={s.cardDate}>Edited {p.date}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── APP ROOT ─────────────────────────────────────────────────────
+const App = () => {
+  const [page, setPage] = useState('workspace');
+  const navigate = (pg) => setPage(pg);
+
+  if (page === 'landing') return <LandingPage onNavigate={navigate}/>;
+  if (page === 'login') return <AuthPage mode="login" onNavigate={navigate}/>;
+  if (page === 'signup') return <AuthPage mode="signup" onNavigate={navigate}/>;
+  if (page === 'dashboard') return <Dashboard onNavigate={navigate}/>;
+  if (page === 'workspace') return <Workspace onNavigate={navigate}/>;
+  return <Workspace onNavigate={navigate}/>;
+};
+
+// ── TWEAKS ───────────────────────────────────────────────────────
+const TWEAK_DEFAULS = /*EDITMODE-BEGIN*/{
+  "startPage": "landing",
+  "nightMode": false,
+  "showMetrics": false,
+  "panelWidth": 320,
+  "guestMode": true
+}/*EDITMODE-END*/;
+
+const AppWithTweaks = () => {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULS);
+  const [page, setPage] = useState(TWEAK_DEFAULS.startPage);
+
+  const navigate = (p) => setPage(p);
+
+  return (
+    <>
+      <TweaksPanel>
+        <TweakSection label="Navigation">
+          <TweakSelect label="Page" value={page}
+            options={[
+              { value: 'workspace', label: 'Workspace' },
+              { value: 'landing', label: 'Landing Page' },
+              { value: 'dashboard', label: 'Project Dashboard' },
+              { value: 'login', label: 'Log In' },
+              { value: 'signup', label: 'Sign Up' },
+            ]}
+            onChange={v => { setTweak('startPage', v); setPage(v); }}/>
+        </TweakSection>
+        <TweakSection label="Canvas Options">
+          <TweakToggle label="Guest Banner" value={tweaks.guestMode} onChange={v => setTweak('guestMode', v)}/>
+        </TweakSection>
+      </TweaksPanel>
+      {page === 'landing' && <LandingPage onNavigate={navigate}/>}
+      {page === 'login' && <AuthPage mode="login" onNavigate={navigate}/>}
+      {page === 'signup' && <AuthPage mode="signup" onNavigate={navigate}/>}
+      {page === 'dashboard' && <Dashboard onNavigate={navigate}/>}
+      {(page === 'workspace' || page === 'reset') && <Workspace onNavigate={navigate}/>}
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<AppWithTweaks/>);
+</script>
+</body>
+</html>
