@@ -116,7 +116,8 @@ export function Canvas() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   const initMap = useCallback(() => {
-    if (!containerRef.current || mapRef.current) return
+    setMapDebug('initMap called')
+    if (!containerRef.current || mapRef.current) { setMapDebug('container missing or already init'); return }
     // Strip BOM and whitespace that Notepad/Windows can add
     const rawToken = import.meta.env.VITE_MAPBOX_TOKEN ?? ''
     const token = rawToken.replace(/^﻿/, '').trim()
@@ -323,8 +324,8 @@ export function Canvas() {
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
       {/* Debug badge — remove before production */}
-      <div style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 99, background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 10, padding: '3px 7px', borderRadius: 4, fontFamily: 'monospace', pointerEvents: 'none' }}>
-        {mapDebug}
+      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 999, background: '#1E293B', color: '#fff', fontSize: 14, padding: '12px 20px', borderRadius: 8, fontFamily: 'monospace', pointerEvents: 'none', border: '2px solid #F59E0B', textAlign: 'center' }}>
+        Map status: {mapDebug}
       </div>
 
       {mapError && (
