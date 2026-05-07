@@ -320,7 +320,7 @@ export function Canvas() {
   ]
 
   return (
-    <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
       {/* Debug badge — remove before production */}
