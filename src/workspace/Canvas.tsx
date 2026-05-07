@@ -93,6 +93,7 @@ export function Canvas() {
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const drawRef = useRef<InstanceType<typeof MapboxDraw> | null>(null)
   const styleLoadedRef = useRef(false)
+  const [mapError, setMapError] = useState<string | null>(null)
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const { nightMode, mode3D, activeTool, activeStyle, activeElementType } = useUIStore()
   const { addFeature, updateGeometry, deleteFeatures, setSelectedIds, features, selectedIds } = useCanvasStore()
@@ -115,15 +116,20 @@ export function Canvas() {
   // ── Init ─────────────────────────────────────────────────────────────────
   const initMap = useCallback(() => {
     if (!containerRef.current || mapRef.current) return
-    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN ?? ''
+    const token = import.meta.env.VITE_MAPBOX_TOKEN
+    if (!token) {
+      console.error('Missing VITE_MAPBOX_TOKEN in .env')
+      return
+    }
+    mapboxgl.accessToken = token
 
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: MAP_STYLES.satellite,
       center: INITIAL_CENTER,
       zoom: INITIAL_ZOOM,
-      preserveDrawingBuffer: true,
       antialias: true,
+      fadeDuration: 0,
     })
 
     const draw = new MapboxDraw({
@@ -140,6 +146,14 @@ export function Canvas() {
       addFeatureLayers(map)
       styleLoadedRef.current = true
       setMapInstance(map)
+      setMapError(null)
+    })
+
+    map.on('error', (e) => {
+      console.error('Mapbox error:', e)
+      if (e.error?.message?.includes('access token') || e.error?.message?.includes('401')) {
+        setMapError('Invalid Mapbox token. Check your .env file.')
+      }
     })
 
     map.on('style.load', () => {
@@ -298,6 +312,16 @@ export function Canvas() {
   return (
     <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {mapError && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.85)', zIndex: 50 }}>
+          <div style={{ background: '#1E293B', border: '1px solid #EF4444', borderRadius: 10, padding: '20px 28px', textAlign: 'center', color: '#fff', maxWidth: 340 }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Map failed to load</div>
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>{mapError}</div>
+          </div>
+        </div>
+      )}
 
       {/* Night mode overlay */}
       {nightMode && (
