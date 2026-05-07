@@ -94,6 +94,7 @@ export function Canvas() {
   const drawRef = useRef<InstanceType<typeof MapboxDraw> | null>(null)
   const styleLoadedRef = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [mapDebug, setMapDebug] = useState<string>('initializing…')
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const { nightMode, mode3D, activeTool, activeStyle, activeElementType } = useUIStore()
   const { addFeature, updateGeometry, deleteFeatures, setSelectedIds, features, selectedIds } = useCanvasStore()
@@ -117,7 +118,9 @@ export function Canvas() {
   const initMap = useCallback(() => {
     if (!containerRef.current || mapRef.current) return
     // Strip BOM and whitespace that Notepad/Windows can add
-    const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
+    const rawToken = import.meta.env.VITE_MAPBOX_TOKEN ?? ''
+    const token = rawToken.replace(/^﻿/, '').trim()
+    setMapDebug(`token: "${token.slice(0, 8)}…" (${token.length} chars)`)
     if (!token) {
       setMapError('Missing Mapbox token. Add VITE_MAPBOX_TOKEN to your .env file and restart npm run dev.')
       return
@@ -148,12 +151,17 @@ export function Canvas() {
       styleLoadedRef.current = true
       setMapInstance(map)
       setMapError(null)
+      setMapDebug('loaded ✓')
     })
 
     map.on('error', (e) => {
       console.error('Mapbox error:', e)
-      if (e.error?.message?.includes('access token') || e.error?.message?.includes('401')) {
+      const msg = e.error?.message ?? 'unknown error'
+      setMapDebug(`error: ${msg}`)
+      if (msg.includes('access token') || msg.includes('401') || msg.includes('Unauthorized')) {
         setMapError('Invalid Mapbox token. Check your .env file.')
+      } else {
+        setMapError(`Map error: ${msg}`)
       }
     })
 
@@ -313,6 +321,11 @@ export function Canvas() {
   return (
     <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* Debug badge — remove before production */}
+      <div style={{ position: 'absolute', bottom: 8, left: 8, zIndex: 99, background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 10, padding: '3px 7px', borderRadius: 4, fontFamily: 'monospace', pointerEvents: 'none' }}>
+        {mapDebug}
+      </div>
 
       {mapError && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.85)', zIndex: 50 }}>
