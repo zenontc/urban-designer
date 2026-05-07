@@ -116,9 +116,10 @@ export function Canvas() {
   // ── Init ─────────────────────────────────────────────────────────────────
   const initMap = useCallback(() => {
     if (!containerRef.current || mapRef.current) return
-    const token = import.meta.env.VITE_MAPBOX_TOKEN
+    // Strip BOM and whitespace that Notepad/Windows can add
+    const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
     if (!token) {
-      console.error('Missing VITE_MAPBOX_TOKEN in .env')
+      setMapError('Missing Mapbox token. Add VITE_MAPBOX_TOKEN to your .env file and restart npm run dev.')
       return
     }
     mapboxgl.accessToken = token
