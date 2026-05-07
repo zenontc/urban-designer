@@ -93,8 +93,8 @@ export function Canvas() {
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const drawRef = useRef<InstanceType<typeof MapboxDraw> | null>(null)
   const styleLoadedRef = useRef(false)
+  const mapStyleInitialized = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
-  const [mapDebug, setMapDebug] = useState<string>('initializing…')
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const { nightMode, mode3D, activeTool, activeStyle, activeElementType } = useUIStore()
   const { addFeature, updateGeometry, deleteFeatures, setSelectedIds, features, selectedIds } = useCanvasStore()
@@ -116,12 +116,10 @@ export function Canvas() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   const initMap = useCallback(() => {
-    setMapDebug('initMap called')
-    if (!containerRef.current || mapRef.current) { setMapDebug('container missing or already init'); return }
+    if (!containerRef.current || mapRef.current) return
     // Strip BOM and whitespace that Notepad/Windows can add
     const rawToken = import.meta.env.VITE_MAPBOX_TOKEN ?? ''
     const token = rawToken.replace(/^﻿/, '').trim()
-    setMapDebug(`token: "${token.slice(0, 8)}…" (${token.length} chars)`)
     if (!token) {
       setMapError('Missing Mapbox token. Add VITE_MAPBOX_TOKEN to your .env file and restart npm run dev.')
       return
@@ -150,15 +148,14 @@ export function Canvas() {
     map.on('load', () => {
       addFeatureLayers(map)
       styleLoadedRef.current = true
+      mapStyleInitialized.current = true
       setMapInstance(map)
       setMapError(null)
-      setMapDebug('loaded ✓')
     })
 
     map.on('error', (e) => {
       console.error('Mapbox error:', e)
       const msg = e.error?.message ?? 'unknown error'
-      setMapDebug(`error: ${msg}`)
       if (msg.includes('access token') || msg.includes('401') || msg.includes('Unauthorized')) {
         setMapError('Invalid Mapbox token. Check your .env file.')
       } else {
@@ -279,6 +276,8 @@ export function Canvas() {
 
   // ── Map style switcher ────────────────────────────────────────────────────
   useEffect(() => {
+    // Skip initial mount — map already loaded with satellite style in constructor
+    if (!mapStyleInitialized.current) return
     const map = mapRef.current
     if (!map) return
     styleLoadedRef.current = false
@@ -322,11 +321,6 @@ export function Canvas() {
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-
-      {/* Debug badge — remove before production */}
-      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 999, background: '#1E293B', color: '#fff', fontSize: 14, padding: '12px 20px', borderRadius: 8, fontFamily: 'monospace', pointerEvents: 'none', border: '2px solid #F59E0B', textAlign: 'center' }}>
-        Map status: {mapDebug}
-      </div>
 
       {mapError && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.85)', zIndex: 50 }}>
