@@ -134,6 +134,7 @@ export function Canvas() {
       zoom: INITIAL_ZOOM,
       antialias: true,
       fadeDuration: 0,
+      preserveDrawingBuffer: true,
     })
 
     const draw = new MapboxDraw({
