@@ -3,8 +3,7 @@ import type { ElementStyle } from '../elements/types'
 
 export type ToolId =
   | 'select' | 'direct' | 'pen' | 'line' | 'rect' | 'ellipse' | 'polygon'
-  | 'addNode' | 'delNode' | 'scissors' | 'text' | 'dimension' | 'measure'
-  | 'hand' | 'zoom'
+  | 'addNode' | 'delNode' | 'scissors' | 'text' | 'dimension' | 'measure' | 'extrude'
 
 const DEFAULT_STYLE: ElementStyle = {
   strokeColor: '#2563EB',
@@ -45,6 +44,7 @@ interface UIState {
   showShareModal: boolean
   showMetricsPanel: boolean
   showCanvasSearch: boolean
+  showElementsPanel: boolean
   canvasSearchQuery: string
   rightPanelWidth: number
   panelZoneHeights: PanelZoneHeights
@@ -60,6 +60,7 @@ interface UIState {
   toggleShareModal: () => void
   toggleMetricsPanel: () => void
   toggleCanvasSearch: () => void
+  toggleElementsPanel: () => void
   setCanvasSearchQuery: (q: string) => void
   setRightPanelWidth: (w: number) => void
   toggleZone: (zone: string) => void
@@ -76,6 +77,7 @@ export const useUIStore = create<UIState>((set) => ({
   showShareModal: false,
   showMetricsPanel: false,
   showCanvasSearch: false,
+  showElementsPanel: false,
   canvasSearchQuery: '',
   rightPanelWidth: 320,
   panelZoneHeights: { style: 20, library: 30, details: 25, layers: 15, metrics: 10 },
@@ -91,6 +93,7 @@ export const useUIStore = create<UIState>((set) => ({
   toggleShareModal: () => set((s) => ({ showShareModal: !s.showShareModal })),
   toggleMetricsPanel: () => set((s) => ({ showMetricsPanel: !s.showMetricsPanel })),
   toggleCanvasSearch: () => set((s) => ({ showCanvasSearch: !s.showCanvasSearch, canvasSearchQuery: '' })),
+  toggleElementsPanel: () => set((s) => ({ showElementsPanel: !s.showElementsPanel })),
   setCanvasSearchQuery: (q) => set({ canvasSearchQuery: q }),
   setRightPanelWidth: (w) => set({ rightPanelWidth: Math.min(480, Math.max(260, w)) }),
   toggleZone: (zone) => set((s) => ({ zoneCollapsed: { ...s.zoneCollapsed, [zone]: !s.zoneCollapsed[zone] } })),

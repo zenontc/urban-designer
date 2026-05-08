@@ -2,7 +2,7 @@ import type { ElementCategory } from './types'
 
 export const ELEMENT_CATEGORIES: ElementCategory[] = [
   {
-    id: 'surfaces', label: 'Transportation Surfaces', icon: 'road', color: '#374151',
+    id: 'surfaces', label: 'Surfaces', icon: 'road', color: '#374151',
     elements: [
       { id: 'surface-asphalt', label: 'Asphalt', category: 'surfaces', drawMode: 'polygon', defaultStyle: { fillColor: '#1F2937', fillOpacity: 0.95, strokeWidth: 0 }, defaultProps: {} },
       { id: 'surface-concrete', label: 'Concrete', category: 'surfaces', drawMode: 'polygon', defaultStyle: { fillColor: '#D1D5DB', fillOpacity: 0.9, strokeWidth: 0 }, defaultProps: {} },
@@ -36,7 +36,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'markings', label: 'Road Markings, Signage & Traffic Control', icon: 'map', color: '#FBBF24',
+    id: 'markings', label: 'Markings & Signage', icon: 'map', color: '#FBBF24',
     elements: [
       { id: 'dbl-yellow', label: 'Double Solid Yellow Centerline', category: 'markings', drawMode: 'line', defaultStyle: { strokeColor: '#FBBF24', strokeWidth: 1 }, defaultProps: {} },
       { id: 'solid-yellow', label: 'Single Solid Yellow Line', category: 'markings', drawMode: 'line', defaultStyle: { strokeColor: '#FBBF24', strokeWidth: 1 }, defaultProps: {} },
@@ -63,7 +63,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'crosswalks', label: 'Crosswalks & Pedestrian Crossings', icon: 'measure', color: '#2563EB',
+    id: 'crosswalks', label: 'Crosswalks', icon: 'measure', color: '#2563EB',
     elements: [
       { id: 'std-crosswalk', label: 'Standard Crosswalk (Type B)', category: 'crosswalks', drawMode: 'line', defaultStyle: { strokeColor: '#FFFFFF', strokeWidth: 2 }, defaultProps: {} },
       { id: 'continental-crosswalk', label: 'Continental Crosswalk', category: 'crosswalks', drawMode: 'line', defaultStyle: { strokeColor: '#FFFFFF', strokeWidth: 2 }, defaultProps: {} },
@@ -95,7 +95,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'paths', label: 'Paths & Active Transportation', icon: 'bike', color: '#16A34A',
+    id: 'paths', label: 'Paths', icon: 'bike', color: '#16A34A',
     elements: [
       { id: 'sidewalk', label: 'Sidewalk', category: 'paths', drawMode: 'line', defaultStyle: { strokeColor: '#D1D5DB', strokeWidth: 2 }, defaultProps: { width: 5 } },
       { id: 'multi-path', label: 'Multi-Use Path', category: 'paths', drawMode: 'line', defaultStyle: { strokeColor: '#D1D5DB', strokeWidth: 2 }, defaultProps: { width: 12 } },
@@ -106,7 +106,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'furniture', label: 'Street Furniture & Site Objects', icon: 'tree', color: '#92400E',
+    id: 'furniture', label: 'Street Furniture', icon: 'tree', color: '#92400E',
     elements: [
       { id: 'bench', label: 'Bench', category: 'furniture', drawMode: 'place', defaultStyle: { fillColor: '#92400E' }, defaultProps: {} },
       { id: 'table-chairs', label: 'Table & Chairs', category: 'furniture', drawMode: 'place', defaultStyle: { fillColor: '#78716C' }, defaultProps: {} },
@@ -140,7 +140,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'utilities', label: 'Utilities & Infrastructure', icon: 'settings', color: '#64748B',
+    id: 'utilities', label: 'Utilities', icon: 'settings', color: '#64748B',
     elements: [
       { id: 'catch-basin', label: 'Stormwater Catch Basin', category: 'utilities', drawMode: 'place', defaultStyle: { fillColor: '#374151' }, defaultProps: {} },
       { id: 'storm-pipe', label: 'Stormwater Pipe', category: 'utilities', drawMode: 'line', defaultStyle: { strokeColor: '#3B82F6', lineType: 'dashed', strokeWidth: 1 }, defaultProps: {} },
@@ -155,7 +155,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'landscape', label: 'Landscape — Ground Surfaces', icon: 'water', color: '#22C55E',
+    id: 'landscape', label: 'Landscape', icon: 'water', color: '#22C55E',
     elements: [
       { id: 'lawn', label: 'Lawn / Turf', category: 'landscape', drawMode: 'polygon', defaultStyle: { fillColor: '#22C55E', fillOpacity: 0.85 }, defaultProps: {} },
       { id: 'meadow', label: 'Meadow / Native Planting', category: 'landscape', drawMode: 'polygon', defaultStyle: { fillColor: '#84CC16', fillOpacity: 0.85 }, defaultProps: {} },
@@ -171,7 +171,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'planting', label: 'Landscape — Planting', icon: 'tree', color: '#15803D',
+    id: 'planting', label: 'Planting', icon: 'tree', color: '#15803D',
     elements: [
       { id: 'tree', label: 'Tree (Individual)', category: 'planting', drawMode: 'place', defaultStyle: { fillColor: '#22C55E' }, defaultProps: { canopyDiameter: 20, species: 'Oak' } },
       { id: 'street-tree', label: 'Street Tree (Row)', category: 'planting', drawMode: 'line', defaultStyle: { strokeColor: '#22C55E', strokeWidth: 2 }, defaultProps: { spacing: 30 } },
@@ -185,7 +185,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'green-infra', label: 'Green Infrastructure & Stormwater', icon: 'water', color: '#0D9488',
+    id: 'green-infra', label: 'Green Infrastructure', icon: 'water', color: '#0D9488',
     elements: [
       { id: 'bioswale', label: 'Bioswale', category: 'green-infra', drawMode: 'polygon', defaultStyle: { fillColor: '#4ADE80', fillOpacity: 0.7 }, defaultProps: {} },
       { id: 'rain-garden', label: 'Rain Garden', category: 'green-infra', drawMode: 'polygon', defaultStyle: { fillColor: '#22D3EE', fillOpacity: 0.7 }, defaultProps: {} },
@@ -196,7 +196,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'actors', label: 'Actors & Scene Elements', icon: 'person', color: '#F97316',
+    id: 'actors', label: 'Actors', icon: 'person', color: '#F97316',
     elements: [
       { id: 'car', label: 'Automobile', category: 'actors', drawMode: 'place', defaultStyle: { fillColor: '#3B82F6' }, defaultProps: {} },
       { id: 'bicyclist', label: 'Bicyclist', category: 'actors', drawMode: 'place', defaultStyle: { fillColor: '#F97316' }, defaultProps: {} },
@@ -210,7 +210,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'annotations', label: 'Site Annotations & Regulatory Lines', icon: 'dimension', color: '#F97316',
+    id: 'annotations', label: 'Annotations', icon: 'dimension', color: '#F97316',
     elements: [
       { id: 'site-boundary', label: 'Site Boundary', category: 'annotations', drawMode: 'polygon', defaultStyle: { strokeColor: '#F97316', fillOpacity: 0, lineType: 'dashed', strokeWidth: 2 }, defaultProps: {} },
       { id: 'property-line', label: 'Property Line / Parcel Boundary', category: 'annotations', drawMode: 'polygon', defaultStyle: { strokeColor: '#DB2777', fillOpacity: 0, strokeWidth: 1 }, defaultProps: {} },

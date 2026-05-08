@@ -11,6 +11,7 @@ import { PrintLayoutModal } from '../workspace/PrintLayoutModal'
 import { ScenarioPanel } from '../workspace/ScenarioPanel'
 import { ContextMenu } from '../workspace/ContextMenu'
 import { ImportZone } from '../workspace/ImportZone'
+import { LeftElementsPanel } from '../workspace/LeftElementsPanel'
 import { useUIStore } from '../store/uiStore'
 import { useAutoSave } from '../hooks/useAutoSave'
 
@@ -67,6 +68,7 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <ToolStrip />
+        <LeftElementsPanel />
 
         {/* Canvas + floating panels container */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
@@ -96,7 +98,7 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
             display: 'flex', gap: 12, alignItems: 'center', pointerEvents: 'none',
             backdropFilter: 'blur(6px)', zIndex: 10,
           }}>
-            {[['V','Select'],['P','Pen'],['R','Rect'],['L','Line'],['H','Pan'],['⌘Z','Undo']].map(([key, label]) => (
+            {[['V','Select'],['P','Pen'],['R','Rect'],['L','Line'],['T','Text'],['⌘Z','Undo']].map(([key, label]) => (
               <span key={key}>
                 <kbd style={{ fontFamily: 'monospace', background: 'rgba(255,255,255,0.15)', borderRadius: 3, padding: '1px 4px' }}>{key}</kbd> {label}
               </span>

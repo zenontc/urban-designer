@@ -1,7 +1,6 @@
 import React, { useRef, useCallback } from 'react'
 import { useUIStore } from '../store/uiStore'
 import { StyleZone } from './zones/StyleZone'
-import { ElementLibraryZone } from './zones/ElementLibraryZone'
 import { DetailsZone } from './zones/DetailsZone'
 import { LayersZone } from './zones/LayersZone'
 import { MetricsZone } from './zones/MetricsZone'
@@ -59,7 +58,6 @@ export function RightPanel() {
         overflowY: 'auto', overflowX: 'hidden',
       }}>
         <StyleZone />
-        <ElementLibraryZone />
         <DetailsZone />
         <LayersZone />
         <MetricsZone />

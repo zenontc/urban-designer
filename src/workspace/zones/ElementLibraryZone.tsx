@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { ZoneHeader } from '../components/ZoneHeader'
 import { useUIStore } from '../../store/uiStore'
 import { ELEMENT_CATEGORIES } from '../../elements/categories'
 import type { ElementTypeDefinition } from '../../elements/types'
@@ -251,67 +250,81 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function ElementLibraryZone() {
-  const { zoneCollapsed, toggleZone, setActiveElementType, activeElementType } = useUIStore()
-  const [openCatId, setOpenCatId] = useState<string>(ELEMENT_CATEGORIES[0].id)
-  const collapsed = zoneCollapsed['library']
+  const { setActiveElementType, activeElementType, setActiveTool } = useUIStore()
+  // All categories expanded by default
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  function toggle(id: string) {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectElement(elId: string, drawMode: string) {
+    setActiveElementType(elId)
+    // Auto-switch to appropriate draw tool
+    if (drawMode === 'polygon') setActiveTool('polygon')
+    else if (drawMode === 'line') setActiveTool('line')
+    else if (drawMode === 'place') setActiveTool('select')
+    else setActiveTool('pen')
+  }
 
   return (
-    <ZoneHeader label="Elements" collapsed={collapsed} onToggle={() => toggleZone('library')}>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {ELEMENT_CATEGORIES.map(cat => {
-          const isOpen = openCatId === cat.id
-          return (
-            <div key={cat.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-              {/* Category header / dropdown trigger */}
-              <button
-                onClick={() => setOpenCatId(isOpen ? '' : cat.id)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 12px', border: 'none', cursor: 'pointer', textAlign: 'left',
-                  background: isOpen ? 'var(--color-accent-subtle)' : 'transparent',
-                  color: isOpen ? 'var(--color-accent)' : 'var(--color-text)',
-                }}
-              >
-                <span style={{ fontSize: 15, flexShrink: 0 }}>{cat.icon}</span>
-                <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>{cat.label}</span>
-                <svg width="10" height="10" viewBox="0 0 10 10" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms', flexShrink: 0, opacity: 0.5 }}>
-                  <polyline points="1,3 5,7 9,3" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              </button>
+    <div style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', flex: 1 }}>
+      {ELEMENT_CATEGORIES.map(cat => {
+        const isOpen = !collapsed.has(cat.id)
+        return (
+          <div key={cat.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <button
+              onClick={() => toggle(cat.id)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 12px', border: 'none', cursor: 'pointer', textAlign: 'left',
+                background: 'var(--color-bg-elevated)',
+                color: 'var(--color-text)',
+                borderBottom: isOpen ? '1px solid var(--color-border)' : 'none',
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)' }}>{cat.label}</span>
+              <svg width="10" height="10" viewBox="0 0 10 10" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms', flexShrink: 0, opacity: 0.4 }}>
+                <polyline points="1,3 5,7 9,3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </button>
 
-              {/* Element tiles */}
-              {isOpen && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, padding: '8px 10px 10px' }}>
-                  {cat.elements.map(el => {
-                    const active = activeElementType === el.id
-                    return (
-                      <button
-                        key={el.id}
-                        onClick={() => setActiveElementType(el.id)}
-                        title={el.label}
-                        style={{
-                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                          padding: '6px 4px', borderRadius: 6, cursor: 'pointer',
-                          border: `1px solid ${active ? 'var(--color-accent)' : 'transparent'}`,
-                          background: active ? 'var(--color-accent-subtle)' : 'transparent',
-                          transition: 'all 100ms',
-                        }}
-                        onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--color-bg-elevated)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
-                        onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
-                      >
-                        <TilePreview el={el} />
-                        <span style={{ fontSize: 9, color: active ? 'var(--color-accent)' : 'var(--color-text-muted)', textAlign: 'center', lineHeight: 1.2, maxWidth: 58, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', fontWeight: active ? 600 : 400 }}>
-                          {el.label}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </ZoneHeader>
+            {isOpen && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, padding: '8px 8px 10px' }}>
+                {cat.elements.map(el => {
+                  const active = activeElementType === el.id
+                  return (
+                    <button
+                      key={el.id}
+                      onClick={() => selectElement(el.id, el.drawMode)}
+                      title={el.label}
+                      style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                        padding: '6px 4px', borderRadius: 7, cursor: 'pointer',
+                        border: `1.5px solid ${active ? 'var(--color-accent)' : 'transparent'}`,
+                        background: active ? 'var(--color-accent-subtle)' : 'transparent',
+                        transition: 'all 100ms',
+                      }}
+                      onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--color-bg-elevated)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
+                      onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
+                    >
+                      <TilePreview el={el} />
+                      <span style={{ fontSize: 9, color: active ? 'var(--color-accent)' : 'var(--color-text-muted)', textAlign: 'center', lineHeight: 1.2, maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', fontWeight: active ? 600 : 400 }}>
+                        {el.label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }

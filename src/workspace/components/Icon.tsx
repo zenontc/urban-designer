@@ -74,6 +74,9 @@ const ICONS: Record<string, React.ReactNode> = {
   externalLink: <><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></>,
   alertTriangle: <><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
   import: <><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
+  extrude: <><path d="M12 2l8 4v8l-8 4-8-4V6l8-4z" fill="none" strokeLinejoin="round"/><path d="M12 10l8-4M12 10v12M12 10l-8-4" strokeLinecap="round"/></>,
+  elements: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+  penPath: <><path d="M3 21l5-5M3 21l1-5 14-9-1 5L3 21z" strokeLinejoin="round"/><circle cx="18" cy="6" r="3"/><path d="M15.5 8.5L7 17" strokeDasharray="2 2"/></>,
 }
 
 export function Icon({ name, size = 16, color = 'currentColor', strokeWidth = 1.5 }: IconProps) {
