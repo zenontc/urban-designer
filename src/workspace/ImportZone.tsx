@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type mapboxgl from 'mapbox-gl'
 import { useCanvasStore, makeFeature } from '../store/canvasStore'
 import { useMapStore } from '../store/mapStore'
@@ -7,66 +7,44 @@ import type { UMPFeature } from '../store/canvasStore'
 function isGeoJSONFeatureCollection(data: unknown): data is GeoJSON.FeatureCollection {
   return typeof data === 'object' && data !== null && (data as Record<string,unknown>).type === 'FeatureCollection'
 }
-
 function isGeoJSONFeature(data: unknown): data is GeoJSON.Feature {
   return typeof data === 'object' && data !== null && (data as Record<string,unknown>).type === 'Feature'
 }
 
 async function parseFile(file: File): Promise<UMPFeature[]> {
   const name = file.name.toLowerCase()
-
   if (name.endsWith('.geojson') || name.endsWith('.json')) {
-    const text = await file.text()
-    const data = JSON.parse(text)
+    const data = JSON.parse(await file.text())
     if (isGeoJSONFeatureCollection(data)) {
       return data.features
         .filter((f): f is GeoJSON.Feature => isGeoJSONFeature(f) && !!f.geometry)
         .map(f => makeFeature(f.geometry, (f.properties?.elementType as string) ?? 'imported', (f.properties?.category as string) ?? 'Import', { label: (f.properties?.label as string) ?? (f.properties?.name as string) ?? 'Imported feature' }))
     }
-    if (isGeoJSONFeature(data) && data.geometry) {
-      return [makeFeature(data.geometry, 'imported', 'Import')]
-    }
+    if (isGeoJSONFeature(data) && data.geometry) return [makeFeature(data.geometry, 'imported', 'Import')]
     throw new Error('Not a valid GeoJSON file')
   }
-
   if (name.endsWith('.shp')) {
     const { default: shp } = await import('shpjs')
-    const buffer = await file.arrayBuffer()
-    const result = await shp(buffer)
+    const result = await shp(await file.arrayBuffer())
     const fc = Array.isArray(result) ? result[0] : result
     if (!fc || !isGeoJSONFeatureCollection(fc)) throw new Error('Could not parse shapefile')
     return fc.features
       .filter((f): f is GeoJSON.Feature => isGeoJSONFeature(f) && !!f.geometry)
-      .map(f => makeFeature(f.geometry, 'imported', 'Import', { label: (f.properties?.NAME as string) ?? (f.properties?.name as string) ?? 'Shape' }))
+      .map(f => makeFeature(f.geometry, 'imported', 'Import', { label: (f.properties?.NAME as string) ?? 'Shape' }))
   }
-
   if (name.endsWith('.kml') || name.endsWith('.kmz')) {
-    const text = await file.text()
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(text, 'text/xml')
-    const placemarks = Array.from(doc.querySelectorAll('Placemark'))
-    return placemarks.flatMap(pm => {
-      const nameEl = pm.querySelector('name')
-      const label = nameEl?.textContent ?? 'KML feature'
+    const doc = new DOMParser().parseFromString(await file.text(), 'text/xml')
+    return Array.from(doc.querySelectorAll('Placemark')).flatMap(pm => {
+      const label = pm.querySelector('name')?.textContent ?? 'KML feature'
       const point = pm.querySelector('Point coordinates')
-      if (point) {
-        const [lng, lat] = point.textContent!.trim().split(',').map(Number)
-        return [makeFeature({ type: 'Point', coordinates: [lng, lat] }, 'imported', 'Import', { label })]
-      }
+      if (point) { const [lng, lat] = point.textContent!.trim().split(',').map(Number); return [makeFeature({ type: 'Point', coordinates: [lng, lat] }, 'imported', 'Import', { label })] }
       const lineCoords = pm.querySelector('LineString coordinates')
-      if (lineCoords) {
-        const coords = lineCoords.textContent!.trim().split(/\s+/).map(s => s.split(',').map(Number).slice(0, 2))
-        return [makeFeature({ type: 'LineString', coordinates: coords }, 'imported', 'Import', { label })]
-      }
+      if (lineCoords) { const coords = lineCoords.textContent!.trim().split(/\s+/).map(s => s.split(',').map(Number).slice(0, 2)); return [makeFeature({ type: 'LineString', coordinates: coords }, 'imported', 'Import', { label })] }
       const polyCoords = pm.querySelector('Polygon outerBoundaryIs coordinates')
-      if (polyCoords) {
-        const coords = polyCoords.textContent!.trim().split(/\s+/).map(s => s.split(',').map(Number).slice(0, 2))
-        return [makeFeature({ type: 'Polygon', coordinates: [coords] }, 'imported', 'Import', { label })]
-      }
+      if (polyCoords) { const coords = polyCoords.textContent!.trim().split(/\s+/).map(s => s.split(',').map(Number).slice(0, 2)); return [makeFeature({ type: 'Polygon', coordinates: [coords] }, 'imported', 'Import', { label })] }
       return []
     })
   }
-
   throw new Error(`Unsupported format: ${name}`)
 }
 
@@ -93,49 +71,59 @@ export function ImportZone() {
   const [dragging, setDragging] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragging(false)
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length === 0) return
+  useEffect(() => {
+    let dragCounter = 0
 
-    const importedAll: UMPFeature[] = []
-    for (const file of files) {
-      try {
-        setStatus(`Importing ${file.name}…`)
-        const features = await parseFile(file)
-        features.forEach(f => addFeature(f))
-        importedAll.push(...features)
-        setStatus(`Imported ${features.length} features from ${file.name}`)
-      } catch (err) {
-        setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    async function onDrop(e: DragEvent) {
+      e.preventDefault()
+      dragCounter = 0
+      setDragging(false)
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      if (files.length === 0) return
+      const importedAll: UMPFeature[] = []
+      for (const file of files) {
+        try {
+          setStatus(`Importing ${file.name}…`)
+          const features = await parseFile(file)
+          features.forEach(f => addFeature(f))
+          importedAll.push(...features)
+          setStatus(`Imported ${features.length} features from ${file.name}`)
+        } catch (err) {
+          setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
+        }
       }
+      if (importedAll.length > 0 && mapInstance) fitToFeatures(mapInstance, importedAll)
+      setTimeout(() => setStatus(null), 4000)
     }
 
-    if (importedAll.length > 0 && mapInstance) {
-      fitToFeatures(mapInstance, importedAll)
+    function onDragEnter(e: DragEvent) {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      dragCounter++
+      setDragging(true)
     }
-    setTimeout(() => setStatus(null), 4000)
+
+    function onDragLeave() {
+      dragCounter--
+      if (dragCounter <= 0) { dragCounter = 0; setDragging(false) }
+    }
+
+    function onDragOver(e: DragEvent) { e.preventDefault() }
+
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
+    }
   }, [addFeature, mapInstance])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragging(true)
-  }, [])
-
-  const handleDragLeave = useCallback(() => setDragging(false), [])
 
   return (
     <>
-      {/* Invisible drop target covering the entire canvas */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        style={{ position: 'absolute', inset: 0, zIndex: dragging ? 50 : 1 }}
-      />
-
-      {/* Drop overlay */}
+      {/* Drop overlay — only renders when dragging, never blocks map interaction */}
       {dragging && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 51,
@@ -152,7 +140,6 @@ export function ImportZone() {
         </div>
       )}
 
-      {/* Status toast */}
       {status && !dragging && (
         <div style={{
           position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)',
