@@ -95,6 +95,7 @@ export function Canvas() {
   const styleLoadedRef = useRef(false)
   const mapStyleInitialized = useRef(false)
   const [mapError, setMapError] = useState<string | null>(null)
+  const [showLabels, setShowLabels] = useState(true)
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const { nightMode, mode3D, activeTool, activeStyle, activeElementType } = useUIStore()
   const { addFeature, updateGeometry, deleteFeatures, setSelectedIds, features, selectedIds } = useCanvasStore()
@@ -311,12 +312,13 @@ export function Canvas() {
   }, [nightMode])
 
   // ── Style switcher UI ─────────────────────────────────────────────────────
-  const STYLE_OPTS: Array<{ key: keyof typeof MAP_STYLES; label: string }> = [
-    { key: 'satellite', label: '🛰' },
-    { key: 'streets',   label: '🗺' },
-    { key: 'light',     label: '☀' },
-    { key: 'dark',      label: '🌙' },
+  const STYLE_OPTS: Array<{ key: keyof typeof MAP_STYLES; label: string; title: string }> = [
+    { key: 'satellite', label: '🛰', title: 'Satellite' },
+    { key: 'streets',   label: '🗺', title: 'Streets' },
+    { key: 'light',     label: '☀', title: 'Light' },
   ]
+
+  const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -337,10 +339,10 @@ export function Canvas() {
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'rgba(10,15,35,0.52)', zIndex: 5 }} />
       )}
 
-      {/* Map style switcher */}
+      {/* Map style switcher + labels toggle */}
       <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 2, background: 'var(--color-bg-panel)', borderRadius: 7, border: '1px solid var(--color-border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
         {STYLE_OPTS.map(opt => (
-          <button key={opt.key} onClick={() => setMapStyle(opt.key)} title={opt.key} style={{
+          <button key={opt.key} onClick={() => setMapStyle(opt.key)} title={opt.title} style={{
             width: 32, height: 32, border: 'none', fontSize: 16, cursor: 'pointer',
             background: mapStyle === opt.key ? 'var(--color-accent-subtle)' : 'transparent',
             borderLeft: mapStyle === opt.key ? '2px solid var(--color-accent)' : '2px solid transparent',
@@ -348,7 +350,33 @@ export function Canvas() {
             {opt.label}
           </button>
         ))}
+        <div style={{ height: 1, background: 'var(--color-border)' }} />
+        <button
+          onClick={() => {
+            const map = mapRef.current
+            if (!map) return
+            setShowLabels(prev => {
+              const next = !prev
+              map.getStyle()?.layers?.forEach(l => {
+                if (l.type === 'symbol') map.setLayoutProperty(l.id, 'visibility', next ? 'visible' : 'none')
+              })
+              return next
+            })
+          }}
+          title={showLabels ? 'Hide labels' : 'Show labels'}
+          style={{
+            width: 32, height: 32, border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            background: showLabels ? 'transparent' : 'var(--color-accent-subtle)',
+            borderLeft: showLabels ? '2px solid transparent' : '2px solid var(--color-accent)',
+            color: showLabels ? 'var(--color-text-muted)' : 'var(--color-accent)',
+          }}
+        >
+          Aa
+        </button>
       </div>
+
+      {/* Location search */}
+      <MapGeocoder token={token} mapRef={mapRef} />
 
       <MapOrientationControl />
 
@@ -361,6 +389,64 @@ export function Canvas() {
           features={features}
           onSelect={id => setSelectedIds([id])}
         />
+      )}
+    </div>
+  )
+}
+
+function MapGeocoder({ token, mapRef }: { token: string; mapRef: React.MutableRefObject<mapboxgl.Map | null> }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Array<{ id: string; place_name: string; center: [number, number] }>>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (query.length < 2) { setResults([]); return }
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&limit=5&types=place,address,poi`)
+        const data = await res.json()
+        setResults(data.features ?? [])
+        setOpen(true)
+      } catch { setResults([]) }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [query, token])
+
+  function flyTo(center: [number, number]) {
+    mapRef.current?.flyTo({ center, zoom: 15, duration: 1200 })
+    setQuery('')
+    setResults([])
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ position: 'absolute', top: 12, left: 56, zIndex: 20, width: 260 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 7, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'visible' }}>
+        <svg style={{ position: 'absolute', left: 9, pointerEvents: 'none' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2">
+          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          value={query}
+          onChange={e => { setQuery(e.target.value); if (!e.target.value) setOpen(false) }}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Search location…"
+          style={{ width: '100%', height: 32, padding: '0 28px 0 30px', fontSize: 12, border: 'none', background: 'transparent', color: 'var(--color-text)', outline: 'none' }}
+        />
+        {query && (
+          <button onClick={() => { setQuery(''); setResults([]); setOpen(false) }} style={{ position: 'absolute', right: 6, width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+        )}
+      </div>
+      {open && results.length > 0 && (
+        <div style={{ marginTop: 4, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 7, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
+          {results.map(r => (
+            <div key={r.id} onMouseDown={() => flyTo(r.center)} style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)', lineHeight: 1.3 }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-elevated)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              {r.place_name}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

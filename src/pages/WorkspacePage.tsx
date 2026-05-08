@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { TopBar } from '../workspace/TopBar'
-import { StyleBar } from '../workspace/StyleBar'
 import { ToolStrip } from '../workspace/ToolStrip'
 import { Canvas } from '../workspace/Canvas'
 import { RightPanel } from '../workspace/RightPanel'
@@ -65,7 +64,6 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
         if (action === 'Print Layout…') setShowPrintLayout(true)
         if (action === 'Scenario…') setShowScenario(true)
       }} />
-      <StyleBar />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         <ToolStrip />
