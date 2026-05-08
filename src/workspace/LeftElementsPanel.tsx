@@ -9,7 +9,7 @@ export function LeftElementsPanel() {
 
   return (
     <div style={{
-      width: 220, minWidth: 220, flexShrink: 0,
+      width: 280, minWidth: 280, flexShrink: 0,
       background: 'var(--color-bg-panel)',
       borderRight: '1px solid var(--color-border)',
       display: 'flex', flexDirection: 'column',

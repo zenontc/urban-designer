@@ -126,7 +126,7 @@ export function TopBar({ onNavigate, onAction }: TopBarProps) {
 
   const s = {
     bar: { height: 52, background: 'var(--color-bg-panel)', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, gap: 8, zIndex: 100, position: 'relative' as const, flexShrink: 0 },
-    logoMark: { width: 40, height: 40, background: '#A3B57A', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 16, letterSpacing: '0.04em', fontFamily: "'Inter Tight', sans-serif", cursor: 'pointer' },
+    logoMark: { width: 36, height: 36, background: '#A3B57A', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 14, letterSpacing: '0.02em', fontFamily: "'Inter Tight', sans-serif", cursor: 'pointer' },
     divider: { width: 1, height: 24, background: 'var(--color-border)', margin: '0 4px' },
     projectName: { fontSize: 14, fontWeight: 500, color: 'var(--color-text)', padding: '3px 6px', borderRadius: 4, border: '1.5px solid transparent', cursor: 'pointer', minWidth: 120, maxWidth: 240, background: 'transparent', outline: 'none' },
     menuBtn: { height: 28, padding: '0 10px', fontSize: 12, fontWeight: 500, borderRadius: 5, border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-text-sec)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 },

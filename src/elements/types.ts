@@ -1,4 +1,4 @@
-export type DrawMode = 'line' | 'polygon' | 'place' | 'builder'
+export type DrawMode = 'line' | 'polygon' | 'place' | 'circle' | 'rect' | 'builder'
 
 export interface ElementStyle {
   strokeColor: string
@@ -19,6 +19,7 @@ export interface ElementStyle {
   fontWeight: 400 | 600 | 700
   fontStyle: 'normal' | 'italic'
   fontFamily: string
+  extrudeHeight?: number
 }
 
 export interface StreetLane {

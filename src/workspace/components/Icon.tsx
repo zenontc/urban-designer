@@ -77,6 +77,8 @@ const ICONS: Record<string, React.ReactNode> = {
   extrude: <><path d="M12 2l8 4v8l-8 4-8-4V6l8-4z" fill="none" strokeLinejoin="round"/><path d="M12 10l8-4M12 10v12M12 10l-8-4" strokeLinecap="round"/></>,
   elements: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
   penPath: <><path d="M3 21l5-5M3 21l1-5 14-9-1 5L3 21z" strokeLinejoin="round"/><circle cx="18" cy="6" r="3"/><path d="M15.5 8.5L7 17" strokeDasharray="2 2"/></>,
+  marquee: <><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="3 2"/><path d="M9 9l6 6M15 9l-6 6" strokeLinecap="round"/></>,
+  penBezier: <><path d="M4 20 C4 12 12 4 20 4" fill="none" strokeLinecap="round"/><circle cx="4" cy="20" r="2.5" fill="currentColor"/><circle cx="20" cy="4" r="2.5" fill="currentColor"/><line x1="4" y1="20" x2="7" y2="13" strokeDasharray="2 2" strokeLinecap="round"/><line x1="20" y1="4" x2="13" y2="7" strokeDasharray="2 2" strokeLinecap="round"/></>,
 }
 
 export function Icon({ name, size = 16, color = 'currentColor', strokeWidth = 1.5 }: IconProps) {

@@ -6,12 +6,12 @@ import { useUIStore, type ToolId } from '../store/uiStore'
 const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }[]> = [
   // Selection
   [
-    { id: 'select',  label: 'Select',        shortcut: 'V', icon: 'select' },
-    { id: 'direct',  label: 'Edit Nodes',    shortcut: 'A', icon: 'directSelect' },
+    { id: 'select',  label: 'Select',          shortcut: 'V', icon: 'select' },
+    { id: 'direct',  label: 'Marquee Select', shortcut: 'A', icon: 'marquee' },
   ],
   // Drawing
   [
-    { id: 'pen',     label: 'Pen / Path',    shortcut: 'P', icon: 'penPath' },
+    { id: 'pen',     label: 'Pen / Path',    shortcut: 'P', icon: 'penBezier' },
     { id: 'line',    label: 'Line',          shortcut: 'L', icon: 'line' },
     { id: 'rect',    label: 'Rectangle',     shortcut: 'R', icon: 'rect' },
     { id: 'ellipse', label: 'Ellipse',       shortcut: 'E', icon: 'ellipse' },
