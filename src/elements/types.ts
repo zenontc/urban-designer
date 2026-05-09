@@ -81,6 +81,11 @@ export interface UMPFeatureProperties {
   textContent?: string
   fontSize?: number
   fontFamily?: string
+  bezierNodes?: Array<{
+    anchor: [number, number]
+    handleIn: [number, number] | null
+    handleOut: [number, number] | null
+  }>
   createdAt: string
   updatedAt: string
 }

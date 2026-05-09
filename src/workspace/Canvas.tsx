@@ -4,6 +4,7 @@ import { useMapStore } from '../store/mapStore'
 import { useUIStore } from '../store/uiStore'
 import { useCanvasStore, makeFeature } from '../store/canvasStore'
 import type { UMPFeature } from '../store/canvasStore'
+import type { UMPFeatureProperties } from '../elements/types'
 import { useLayersStore } from '../store/layersStore'
 import type { LayerItem } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
@@ -57,7 +58,7 @@ function bezierNodesToCoords(nodes: BezierNode[]): [number, number][] {
   return coords
 }
 
-function bezierNodesToSVGPath(map: mapboxgl.Map, nodes: BezierNode[], extraScreen?: [number, number]): string {
+function bezierNodesToSVGPath(map: mapboxgl.Map, nodes: BezierNode[], extraScreen?: [number, number], closed = false): string {
   if (nodes.length === 0) return ''
   const [fx, fy] = lngLatToScreen(map, nodes[0].anchor)
   let d = `M ${fx} ${fy}`
@@ -68,6 +69,13 @@ function bezierNodesToSVGPath(map: mapboxgl.Map, nodes: BezierNode[], extraScree
     const cp1 = prev.handleOut ? lngLatToScreen(map, prev.handleOut) : lngLatToScreen(map, prev.anchor)
     const cp2 = curr.handleIn ? lngLatToScreen(map, curr.handleIn) : [x2, y2]
     d += ` C ${cp1[0]} ${cp1[1]} ${cp2[0]} ${cp2[1]} ${x2} ${y2}`
+  }
+  if (closed && nodes.length >= 2) {
+    const last = nodes[nodes.length - 1]
+    const cp1 = last.handleOut ? lngLatToScreen(map, last.handleOut) : lngLatToScreen(map, last.anchor)
+    const cp2 = nodes[0].handleIn ? lngLatToScreen(map, nodes[0].handleIn) : [fx, fy]
+    d += ` C ${cp1[0]} ${cp1[1]} ${cp2[0]} ${cp2[1]} ${fx} ${fy} Z`
+    return d
   }
   if (extraScreen) {
     const last = nodes[nodes.length - 1]
@@ -261,6 +269,13 @@ export function Canvas() {
 
   // Measure
   const [measurePts, setMeasurePts] = useState<[number, number][]>([])
+  const measurePtsRef = useRef<[number, number][]>([])
+
+  // Bezier direct-editing
+  const [activeBezierNode, setActiveBezierNode] = useState<{ featureId: string; idx: number } | null>(null)
+  const [draggingBezierHandle, setDraggingBezierHandle] = useState<{
+    featureId: string; nodeIdx: number; which: 'handleIn' | 'handleOut' | 'anchor'
+  } | null>(null)
 
   // Text
   const [textPopup, setTextPopup] = useState<{ x: number; y: number; lngLat: [number, number] } | null>(null)
@@ -318,6 +333,7 @@ export function Canvas() {
   useEffect(() => { drawNodesRef.current = drawNodes }, [drawNodes])
   useEffect(() => { penNodesRef.current = penNodes }, [penNodes])
   useEffect(() => { snapTargetRef.current = snapTarget }, [snapTarget])
+  useEffect(() => { measurePtsRef.current = measurePts }, [measurePts])
 
   // Extrude sync
   useEffect(() => {
@@ -351,6 +367,10 @@ export function Canvas() {
       styleLoadedRef.current = true
       setMapInstance(map)
       setMapError(null)
+      // Auto-fly to user's location
+      navigator.geolocation?.getCurrentPosition(pos => {
+        map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 })
+      })
     })
     map.on('error', (e) => {
       const msg = e.error?.message ?? ''
@@ -541,18 +561,50 @@ export function Canvas() {
           }
         }
       }
-      // Check vertex handles
-      if (selId) {
+      // Check vertex / bezier handles (direct tool = node editing, select tool = whole object)
+      if (selId && tool === 'direct') {
         const selFeat = featuresRef.current.find(f => f.properties.id === selId)
         if (selFeat) {
-          const verts = getVertices(selFeat.geometry)
-          for (const v of verts) {
-            const [vx, vy] = lngLatToScreen(map, v.coord)
-            if (Math.hypot(vx - sx, vy - sy) < 9) {
-              setDraggingNode({ featureId: selId, path: v.path })
-              mouseDownOnFeatureRef.current = true
-              e.stopPropagation()
-              return
+          const bezNodes = selFeat.properties.bezierNodes as BezierNode[] | undefined
+          if (bezNodes) {
+            // Check bezier handles of the active node first
+            const abn = activeBezierNode?.featureId === selId ? activeBezierNode : null
+            if (abn) {
+              const node = bezNodes[abn.idx]
+              if (node) {
+                for (const which of ['handleIn', 'handleOut'] as ('handleIn' | 'handleOut')[]) {
+                  const h = node[which]
+                  if (h) {
+                    const [hx, hy] = lngLatToScreen(map, h)
+                    if (Math.hypot(hx - sx, hy - sy) < 8) {
+                      setDraggingBezierHandle({ featureId: selId, nodeIdx: abn.idx, which })
+                      mouseDownOnFeatureRef.current = true
+                      return
+                    }
+                  }
+                }
+              }
+            }
+            // Check anchors
+            for (let i = 0; i < bezNodes.length; i++) {
+              const [ax, ay] = lngLatToScreen(map, bezNodes[i].anchor)
+              if (Math.hypot(ax - sx, ay - sy) < 8) {
+                setActiveBezierNode({ featureId: selId, idx: i })
+                setDraggingBezierHandle({ featureId: selId, nodeIdx: i, which: 'anchor' })
+                mouseDownOnFeatureRef.current = true
+                return
+              }
+            }
+          } else {
+            const verts = getVertices(selFeat.geometry)
+            for (const v of verts) {
+              const [vx, vy] = lngLatToScreen(map, v.coord)
+              if (Math.hypot(vx - sx, vy - sy) < 9) {
+                setDraggingNode({ featureId: selId, path: v.path })
+                mouseDownOnFeatureRef.current = true
+                e.stopPropagation()
+                return
+              }
             }
           }
         }
@@ -602,6 +654,41 @@ export function Canvas() {
       setSnapTarget(getSnapPoint(map, visible, sx, sy))
     } else if (activeToolRef.current !== 'pen') {
       setSnapTarget(null)
+    }
+
+    // Bezier handle dragging (direct tool)
+    if (draggingBezierHandle) {
+      const feat = featuresRef.current.find(f => f.properties.id === draggingBezierHandle.featureId)
+      if (feat?.properties.bezierNodes) {
+        const nodes = feat.properties.bezierNodes as BezierNode[]
+        const updatedNodes = nodes.map((n, i) => {
+          if (i !== draggingBezierHandle.nodeIdx) return n
+          if (draggingBezierHandle.which === 'anchor') {
+            const dx = lngLat[0] - n.anchor[0], dy = lngLat[1] - n.anchor[1]
+            return {
+              anchor: lngLat,
+              handleIn: n.handleIn ? [n.handleIn[0] + dx, n.handleIn[1] + dy] as [number, number] : null,
+              handleOut: n.handleOut ? [n.handleOut[0] + dx, n.handleOut[1] + dy] as [number, number] : null,
+            }
+          }
+          if (draggingBezierHandle.which === 'handleOut') {
+            const mirror: [number, number] = [2 * n.anchor[0] - lngLat[0], 2 * n.anchor[1] - lngLat[1]]
+            return { ...n, handleOut: lngLat as [number, number], handleIn: n.handleIn ? mirror : null }
+          }
+          if (draggingBezierHandle.which === 'handleIn') {
+            const mirror: [number, number] = [2 * n.anchor[0] - lngLat[0], 2 * n.anchor[1] - lngLat[1]]
+            return { ...n, handleIn: lngLat as [number, number], handleOut: n.handleOut ? mirror : null }
+          }
+          return n
+        })
+        const newCoords = updatedNodes.map(n => n.anchor)
+        const g = JSON.parse(JSON.stringify(feat.geometry)) as GeoJSON.Geometry
+        if (g.type === 'LineString') (g as GeoJSON.LineString).coordinates = newCoords
+        if (g.type === 'Polygon') (g as GeoJSON.Polygon).coordinates[0] = [...newCoords, newCoords[0]]
+        updateGeometry(feat.properties.id, g)
+        updateFeature(feat.properties.id, { bezierNodes: updatedNodes as UMPFeatureProperties['bezierNodes'] })
+      }
+      return
     }
 
     // Rotation dragging
@@ -682,6 +769,11 @@ export function Canvas() {
 
     // Clear select-tool pan
     panStartRef.current = null
+
+    if (draggingBezierHandle) {
+      setDraggingBezierHandle(null)
+      return
+    }
 
     if (draggingRotation) {
       setDraggingRotation(null)
@@ -796,10 +888,12 @@ export function Canvas() {
             ? ids.filter(id => id !== hit.properties.id)
             : [...ids, hit.properties.id])
         } else {
+          if (hit.properties.id !== selectedIdsRef.current[0]) setActiveBezierNode(null)
           setSelectedIds([hit.properties.id])
         }
         return
       }
+      setActiveBezierNode(null)
 
       // Click-to-place for 'place' drawMode elements
       const elType = activeElementTypeRef.current
@@ -866,6 +960,18 @@ export function Canvas() {
       if (pnodes.length >= 3) { finishBezierPolygon(pnodes); return }
       if (pnodes.length >= 2) { finishBezierLine(pnodes); return }
     }
+    if (tool === 'measure') {
+      const pts = measurePtsRef.current
+      if (pts.length >= 2) {
+        const dist = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + haversineFt(pts[i - 1], p), 0)
+        addFeatureWithLayer(makeFeature(
+          { type: 'LineString', coordinates: pts },
+          'measurement', 'annotations',
+          { label: `Measurement (${fmtDist(dist)})`, style: { ...activeStyleRef.current, strokeColor: '#F59E0B', strokeWidth: 2, dashArray: [5, 3], fillOpacity: 0 } },
+        ))
+        setMeasurePts([])
+      }
+    }
   }, [])
 
   // ── Finish drawing ────────────────────────────────────────────────────────
@@ -912,16 +1018,19 @@ export function Canvas() {
 
   function finishBezierLine(nodes: BezierNode[]) {
     if (nodes.length < 2) return
-    const coords = bezierNodesToCoords(nodes)
-    addFeatureWithLayer(makeElFeature({ type: 'LineString', coordinates: coords }, 'pen', 'custom'))
+    const coords = nodes.map(n => n.anchor)
+    const feat = makeElFeature({ type: 'LineString', coordinates: coords }, 'pen', 'custom')
+    feat.properties.bezierNodes = nodes
+    addFeatureWithLayer(feat)
     setPenNodes([])
   }
 
   function finishBezierPolygon(nodes: BezierNode[]) {
     if (nodes.length < 3) return
-    const closedNodes = [...nodes, { ...nodes[0] }]
-    const coords = bezierNodesToCoords(closedNodes)
-    addFeatureWithLayer(makeElFeature({ type: 'Polygon', coordinates: [[...coords, coords[0]]] }, 'pen', 'custom'))
+    const coords: [number, number][] = [...nodes.map(n => n.anchor), nodes[0].anchor]
+    const feat = makeElFeature({ type: 'Polygon', coordinates: [coords] }, 'pen', 'custom')
+    feat.properties.bezierNodes = nodes
+    addFeatureWithLayer(feat)
     setPenNodes([])
   }
 
@@ -1083,7 +1192,10 @@ export function Canvas() {
         return renderPointSymbol(f, px, py, isSelected, isHovered, selColor, strokeColor)
       }
 
-      const path = geomToScreenPath(map, f.geometry)
+      const bezNodes = f.properties.bezierNodes as BezierNode[] | undefined
+      const path = bezNodes
+        ? bezierNodesToSVGPath(map, bezNodes, undefined, f.geometry.type === 'Polygon')
+        : geomToScreenPath(map, f.geometry)
       const isLine = f.geometry.type === 'LineString'
       const sw = style.strokeWidth ?? 2
 
@@ -1091,7 +1203,7 @@ export function Canvas() {
       if (f.properties.category === 'streets' && isLine) {
         const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === f.properties.elementType)
         const rowWidthFt = (el?.defaultProps as { rowWidth?: number })?.rowWidth ?? 30
-        const coords = f.geometry.coordinates as [number, number][]
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
         const avgLat = coords.reduce((s, c) => s + (c as [number,number])[1], 0) / coords.length
         const corrPx = Math.max(4, feetToPixels(map, rowWidthFt, avgLat))
         const roadColor = style.strokeColor ?? '#374151'
@@ -1300,35 +1412,77 @@ export function Canvas() {
       const handleX = bb.x + bb.w / 2
       const handleY = bb.y - 6 - 28
 
+      const bezNodes = f.properties.bezierNodes as BezierNode[] | undefined
+      const isDirectTool = activeTool === 'direct'
+
       return (
         <g key={`sel-${id}`} style={{ pointerEvents: 'none' }}>
-          {/* Bounding box */}
+          {/* Bounding box (always) */}
           {hasBbox && (
             <rect x={bb.x - 6} y={bb.y - 6} width={bb.w + 12} height={bb.h + 12}
               fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
           )}
-          {/* Rotation handle — only for non-point features */}
-          {hasBbox && f.geometry.type !== 'Point' && (
+
+          {/* Select tool: rotation handle + scale corner handles */}
+          {!isDirectTool && hasBbox && f.geometry.type !== 'Point' && (
             <>
               <line x1={handleX} y1={bb.y - 6} x2={handleX} y2={handleY + 7}
                 stroke="#2563EB" strokeWidth={1} opacity={0.45} />
               <circle cx={handleX} cy={handleY} r={7}
                 fill={hoveredRotHandle ? '#EFF6FF' : 'white'}
                 stroke="#2563EB" strokeWidth={1.5} />
-              {/* Curved arrow icon */}
               <path d={`M ${handleX - 3.5} ${handleY + 1} A 4 4 0 1 1 ${handleX + 1} ${handleY - 3.5}`}
                 fill="none" stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
               <path d={`M ${handleX + 1} ${handleY - 3.5} L ${handleX + 1} ${handleY - 6} M ${handleX + 1} ${handleY - 3.5} L ${handleX + 3.5} ${handleY - 3.5}`}
                 stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
+              {/* Scale handles at corners */}
+              {[
+                [bb.x - 6, bb.y - 6], [bb.x + bb.w + 6, bb.y - 6],
+                [bb.x - 6, bb.y + bb.h + 6], [bb.x + bb.w + 6, bb.y + bb.h + 6],
+              ].map(([sx, sy], i) => (
+                <rect key={i} x={sx - 3.5} y={sy - 3.5} width={7} height={7}
+                  fill="white" stroke="#2563EB" strokeWidth={1.5} />
+              ))}
             </>
           )}
-          {/* Vertex handles */}
-          {screenVerts.map(([vx, vy], i) => (
-            <g key={i}>
-              <circle cx={vx} cy={vy} r={4.5} fill="white" stroke="#2563EB" strokeWidth={1.5}
-                style={{ filter: hoveredVertIdx === i ? 'drop-shadow(0 0 3px #2563EB)' : undefined }} />
-            </g>
-          ))}
+
+          {/* Direct tool: vertex anchors + bezier handles for active node */}
+          {isDirectTool && (
+            <>
+              {bezNodes ? (
+                bezNodes.map((node, i) => {
+                  const [ax, ay] = lngLatToScreen(map, node.anchor)
+                  const isActive = activeBezierNode?.featureId === id && activeBezierNode.idx === i
+                  return (
+                    <g key={i}>
+                      {/* Bezier handles for active node */}
+                      {isActive && node.handleIn && (() => {
+                        const [hx, hy] = lngLatToScreen(map, node.handleIn)
+                        return <><line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={4} fill="#2563EB" opacity={0.8} /></>
+                      })()}
+                      {isActive && node.handleOut && (() => {
+                        const [hx, hy] = lngLatToScreen(map, node.handleOut)
+                        return <><line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={4} fill="#2563EB" opacity={0.8} /></>
+                      })()}
+                      {/* Anchor: square for corner, circle for smooth */}
+                      {(node.handleIn || node.handleOut) ? (
+                        <circle cx={ax} cy={ay} r={4.5} fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
+                      ) : (
+                        <rect x={ax - 4} y={ay - 4} width={8} height={8} fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
+                      )}
+                    </g>
+                  )
+                })
+              ) : (
+                screenVerts.map(([vx, vy], i) => (
+                  <g key={i}>
+                    <rect x={vx - 4} y={vy - 4} width={8} height={8}
+                      fill={hoveredVertIdx === i ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
+                  </g>
+                ))
+              )}
+            </>
+          )}
         </g>
       )
     })
@@ -1411,6 +1565,21 @@ export function Canvas() {
         onMouseUp={handleMouseUp}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onWheel={e => {
+          const map = mapRef.current
+          if (!map) return
+          map.getCanvas().dispatchEvent(new WheelEvent('wheel', {
+            bubbles: true,
+            cancelable: e.cancelable,
+            deltaX: e.nativeEvent.deltaX,
+            deltaY: e.nativeEvent.deltaY,
+            deltaZ: e.nativeEvent.deltaZ,
+            deltaMode: e.nativeEvent.deltaMode,
+            ctrlKey: e.nativeEvent.ctrlKey,
+            clientX: e.nativeEvent.clientX,
+            clientY: e.nativeEvent.clientY,
+          }))
+        }}
       />
 
       {/* ── UI overlays ──────────────────────────────────────────────────── */}
@@ -1433,6 +1602,19 @@ export function Canvas() {
       <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
         <MapGeocoder token={token} mapRef={mapRef} />
         <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--color-bg-panel)', borderRadius: 8, border: '1px solid var(--color-border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+          {/* Location button */}
+          <button
+            onClick={() => navigator.geolocation?.getCurrentPosition(pos => {
+              mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 800 })
+            })}
+            title="Go to my location"
+            style={{ width: 36, height: 32, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="10" opacity="0.3" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" /><line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
+            </svg>
+          </button>
+          <div style={{ height: 1, background: 'var(--color-border)' }} />
           {(Object.keys(MAP_STYLES) as (keyof typeof MAP_STYLES)[]).map(k => (
             <MapStyleBtn key={k} styleKey={k} active={mapStyle === k} onClick={() => setMapStyle(k)} />
           ))}
@@ -1566,9 +1748,11 @@ function MapStyleBtn({ styleKey, active, onClick }: { styleKey: string; active: 
 // ── MapGeocoder ───────────────────────────────────────────────────────────────
 
 function MapGeocoder({ token, mapRef }: { token: string; mapRef: React.MutableRefObject<mapboxgl.Map | null> }) {
+  const [expanded, setExpanded] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<{ id: string; place_name: string; center: [number, number] }>>([])
   const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (query.length < 2) { setResults([]); return }
@@ -1585,22 +1769,37 @@ function MapGeocoder({ token, mapRef }: { token: string; mapRef: React.MutableRe
 
   function flyTo(center: [number, number]) {
     mapRef.current?.flyTo({ center, zoom: 15, duration: 1200 })
-    setQuery(''); setResults([]); setOpen(false)
+    setQuery(''); setResults([]); setOpen(false); setExpanded(false)
+  }
+
+  function collapse() {
+    setTimeout(() => { setOpen(false); setExpanded(false); setQuery(''); setResults([]) }, 150)
+  }
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={() => { setExpanded(true); setTimeout(() => inputRef.current?.focus(), 30) }}
+        title="Search location"
+        style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.12)', color: 'var(--color-text-muted)' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+      </button>
+    )
   }
 
   return (
     <div style={{ width: 260 }}>
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
         <svg style={{ position: 'absolute', left: 9, pointerEvents: 'none' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-        <input value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setOpen(false) }}
+        <input ref={inputRef} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setOpen(false) }}
           onFocus={() => results.length > 0 && setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onBlur={collapse}
+          onKeyDown={e => { if (e.key === 'Escape') collapse() }}
           placeholder="Search location…"
           style={{ width: '100%', height: 34, padding: '0 28px 0 30px', fontSize: 12, border: 'none', background: 'transparent', color: 'var(--color-text)', outline: 'none', borderRadius: 8 }} />
-        {query && (
-          <button onClick={() => { setQuery(''); setResults([]); setOpen(false) }}
-            style={{ position: 'absolute', right: 6, width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14 }}>×</button>
-        )}
+        <button onClick={collapse}
+          style={{ position: 'absolute', right: 6, width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14 }}>×</button>
       </div>
       {open && results.length > 0 && (
         <div style={{ marginTop: 4, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
