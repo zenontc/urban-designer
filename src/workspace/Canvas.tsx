@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
-import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import { useMapStore } from '../store/mapStore'
 import { useUIStore } from '../store/uiStore'
 import { useCanvasStore, makeFeature } from '../store/canvasStore'
@@ -8,6 +7,10 @@ import type { UMPFeature } from '../store/canvasStore'
 import { useLayersStore } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
 import { ELEMENT_CATEGORIES } from '../elements/categories'
+import {
+  lngLatToScreen, screenToLngLat, haversineFt, fmtDist,
+  distToSegment, pointInPolygon, screenBbox,
+} from '../utils/geo'
 
 const INITIAL_CENTER: [number, number] = [-87.6298, 41.8781]
 const INITIAL_ZOOM = 15
@@ -18,209 +21,174 @@ const MAP_STYLES: Record<string, string> = {
   light:     'mapbox://styles/mapbox/light-v11',
 }
 
-const DRAW_STYLES = [
-  { id: 'gl-draw-polygon-fill',    type: 'fill',   filter: ['all', ['==', '$type', 'Polygon'],    ['!=', 'mode', 'static']], paint: { 'fill-color': '#2563EB', 'fill-opacity': 0.15 } },
-  { id: 'gl-draw-polygon-stroke',  type: 'line',   filter: ['all', ['==', '$type', 'Polygon'],    ['!=', 'mode', 'static']], paint: { 'line-color': '#2563EB', 'line-width': 2 } },
-  { id: 'gl-draw-line',            type: 'line',   filter: ['all', ['==', '$type', 'LineString'], ['!=', 'mode', 'static']], paint: { 'line-color': '#2563EB', 'line-width': 2 } },
-  { id: 'gl-draw-point',           type: 'circle', filter: ['all', ['==', '$type', 'Point'],      ['!=', 'mode', 'static']], paint: { 'circle-radius': 5, 'circle-color': '#2563EB' } },
-  { id: 'gl-draw-polygon-midpoint',type: 'circle', filter: ['all', ['==', '$type', 'Point'],      ['==', 'meta', 'midpoint']], paint: { 'circle-radius': 4, 'circle-color': '#fff', 'circle-stroke-width': 2, 'circle-stroke-color': '#2563EB' } },
-  { id: 'gl-draw-vertex',          type: 'circle', filter: ['all', ['==', '$type', 'Point'],      ['==', 'meta', 'vertex']], paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-width': 2, 'circle-stroke-color': '#2563EB' } },
-  { id: 'gl-draw-polygon-fill-st', type: 'fill',   filter: ['all', ['==', '$type', 'Polygon'],    ['==', 'mode', 'static']], paint: { 'fill-color': '#2563EB', 'fill-opacity': 0.1 } },
-  { id: 'gl-draw-polygon-stroke-st', type: 'line', filter: ['all', ['==', '$type', 'Polygon'],    ['==', 'mode', 'static']], paint: { 'line-color': '#2563EB', 'line-width': 2 } },
-  { id: 'gl-draw-line-st',         type: 'line',   filter: ['all', ['==', '$type', 'LineString'], ['==', 'mode', 'static']], paint: { 'line-color': '#2563EB', 'line-width': 2 } },
-  { id: 'gl-draw-point-st',        type: 'circle', filter: ['all', ['==', '$type', 'Point'],      ['==', 'mode', 'static']], paint: { 'circle-radius': 5, 'circle-color': '#2563EB' } },
-]
+// ── Geometry helpers ────────────────────────────────────────────────────────
 
-// Haversine distance in feet between two [lng, lat] coords
-function distFt(a: [number, number], b: [number, number]): number {
-  const R = 20902231 // earth radius in feet
-  const dLat = (b[1] - a[1]) * Math.PI / 180
-  const dLon = (b[0] - a[0]) * Math.PI / 180
-  const sin2 = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * Math.PI / 180) * Math.cos(b[1] * Math.PI / 180) * Math.sin(dLon / 2) ** 2
-  return R * 2 * Math.asin(Math.sqrt(sin2))
-}
-
-function fmtDist(ft: number): string {
-  if (ft < 5280) return `${Math.round(ft)} ft`
-  return `${(ft / 5280).toFixed(2)} mi`
-}
-
-// Extract editable vertex GeoJSON points from a feature
-function extractVertexFeatures(f: UMPFeature): GeoJSON.Feature[] {
-  const g = f.geometry
-  const verts: GeoJSON.Feature[] = []
-  const push = (c: number[], path: number[]) =>
-    verts.push({ type: 'Feature', id: `v-${f.properties.id}-${path.join('-')}`, geometry: { type: 'Point', coordinates: c }, properties: { featureId: f.properties.id, path: JSON.stringify(path) } })
-
-  if (g.type === 'Point') { push(g.coordinates as number[], []); return verts }
-  if (g.type === 'LineString') {
-    (g.coordinates as number[][]).forEach((c, i) => push(c, [i]))
-    return verts
+function geomToScreenPath(map: mapboxgl.Map, geom: GeoJSON.Geometry): string {
+  if (geom.type === 'LineString') {
+    return (geom.coordinates as number[][]).map((c, i) => {
+      const [x, y] = lngLatToScreen(map, c as [number, number])
+      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+    }).join(' ')
   }
-  if (g.type === 'Polygon') {
-    const ring = g.coordinates[0] as number[][]
-    for (let i = 0; i < ring.length - 1; i++) push(ring[i], [0, i])
-    return verts
+  if (geom.type === 'Polygon') {
+    return (geom.coordinates as number[][][]).map(ring =>
+      ring.map((c, i) => {
+        const [x, y] = lngLatToScreen(map, c as [number, number])
+        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+      }).join(' ') + ' Z'
+    ).join(' ')
   }
-  return verts
+  return ''
 }
 
-// Deep-update a coordinate in a geometry copy
-function updateCoordInGeom(geom: GeoJSON.Geometry, path: number[], newCoord: [number, number]): GeoJSON.Geometry {
+interface Vertex { coord: [number, number]; path: number[] }
+
+function getVertices(geom: GeoJSON.Geometry): Vertex[] {
+  if (geom.type === 'Point')
+    return [{ coord: geom.coordinates as [number, number], path: [] }]
+  if (geom.type === 'LineString')
+    return (geom.coordinates as number[][]).map((c, i) => ({ coord: c as [number, number], path: [i] }))
+  if (geom.type === 'Polygon') {
+    const ring = (geom.coordinates as number[][][])[0]
+    return ring.slice(0, -1).map((c, i) => ({ coord: c as [number, number], path: [0, i] }))
+  }
+  return []
+}
+
+function updateCoordInGeom(geom: GeoJSON.Geometry, path: number[], coord: [number, number]): GeoJSON.Geometry {
   const g = JSON.parse(JSON.stringify(geom)) as GeoJSON.Geometry
-  if (g.type === 'Point') { (g as GeoJSON.Point).coordinates = newCoord; return g }
-  if (g.type === 'LineString') { (g as GeoJSON.LineString).coordinates[path[0]] = newCoord; return g }
+  if (g.type === 'Point') { (g as GeoJSON.Point).coordinates = coord; return g }
+  if (g.type === 'LineString') { (g as GeoJSON.LineString).coordinates[path[0]] = coord; return g }
   if (g.type === 'Polygon') {
     const ring = (g as GeoJSON.Polygon).coordinates[path[0]]
-    ring[path[1]] = newCoord
-    // Keep polygon closed
-    if (path[1] === 0) ring[ring.length - 1] = newCoord
+    ring[path[1]] = coord
+    if (path[1] === 0) ring[ring.length - 1] = coord
     return g
   }
   return g
 }
 
-function addFeatureLayers(map: mapboxgl.Map) {
-  if (map.getSource('ump-features')) return
-
-  for (const id of ['ump-features', 'ump-selected', 'ump-glow', 'ump-labels', 'ump-vertices', 'ump-measure', 'ump-extruded']) {
-    map.addSource(id, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+// Hit-test features at a screen position
+function hitTestFeatures(
+  map: mapboxgl.Map,
+  features: UMPFeature[],
+  sx: number,
+  sy: number,
+): UMPFeature | null {
+  for (let i = features.length - 1; i >= 0; i--) {
+    const f = features[i]
+    const g = f.geometry
+    if (g.type === 'Point') {
+      const [px, py] = lngLatToScreen(map, g.coordinates as [number, number])
+      if (Math.hypot(px - sx, py - sy) < 14) return f
+    }
+    if (g.type === 'LineString') {
+      const coords = g.coordinates as number[][]
+      for (let j = 0; j < coords.length - 1; j++) {
+        const [x1, y1] = lngLatToScreen(map, coords[j] as [number, number])
+        const [x2, y2] = lngLatToScreen(map, coords[j + 1] as [number, number])
+        if (distToSegment(sx, sy, x1, y1, x2, y2) < 8) return f
+      }
+    }
+    if (g.type === 'Polygon') {
+      const ring = (g.coordinates as number[][][])[0]
+      const screenRing = ring.map(c => lngLatToScreen(map, c as [number, number]))
+      if (pointInPolygon([sx, sy], screenRing)) return f
+    }
   }
-
-  // Feature layers
-  map.addLayer({ id: 'ump-fill', type: 'fill', source: 'ump-features', filter: ['==', '$type', 'Polygon'],
-    paint: { 'fill-color': ['coalesce', ['get', 'fillColor', ['get', 'style']], '#2563EB'], 'fill-opacity': ['/', ['coalesce', ['get', 'fillOpacity', ['get', 'style']], 70], 100] } })
-  map.addLayer({ id: 'ump-line', type: 'line', source: 'ump-features',
-    paint: { 'line-color': ['coalesce', ['get', 'strokeColor', ['get', 'style']], '#2563EB'], 'line-width': ['coalesce', ['get', 'strokeWidth', ['get', 'style']], 2] } })
-  map.addLayer({ id: 'ump-point', type: 'circle', source: 'ump-features', filter: ['==', '$type', 'Point'],
-    paint: { 'circle-radius': 6, 'circle-color': ['coalesce', ['get', 'strokeColor', ['get', 'style']], '#2563EB'], 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
-
-  // 3D extrusion layer
-  map.addLayer({ id: 'ump-extrusion', type: 'fill-extrusion', source: 'ump-extruded',
-    paint: {
-      'fill-extrusion-color': ['coalesce', ['get', 'fillColor', ['get', 'style']], '#334155'],
-      'fill-extrusion-height': ['coalesce', ['get', 'extrudeHeight', ['get', 'style']], 10],
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.85,
-    } })
-
-  // Text labels
-  map.addLayer({ id: 'ump-labels', type: 'symbol', source: 'ump-labels',
-    layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
-    paint: { 'text-color': '#fff', 'text-halo-color': 'rgba(0,0,0,0.6)', 'text-halo-width': 1.5 } })
-
-  // Text element layer
-  map.addLayer({ id: 'ump-text', type: 'symbol', source: 'ump-features',
-    filter: ['==', ['get', 'elementType'], 'text'],
-    layout: { 'text-field': ['coalesce', ['get', 'textContent', ['get', 'style']], ['get', 'label']], 'text-size': ['coalesce', ['get', 'fontSize', ['get', 'style']], 16], 'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'] },
-    paint: { 'text-color': ['coalesce', ['get', 'strokeColor', ['get', 'style']], '#ffffff'], 'text-halo-color': 'rgba(0,0,0,0.6)', 'text-halo-width': 2 } })
-
-  // Selection highlight
-  map.addLayer({ id: 'ump-sel-fill', type: 'fill',   source: 'ump-selected', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#F59E0B', 'fill-opacity': 0.2 } })
-  map.addLayer({ id: 'ump-sel-line', type: 'line',   source: 'ump-selected', paint: { 'line-color': '#F59E0B', 'line-width': 3, 'line-dasharray': [2, 1] } })
-  map.addLayer({ id: 'ump-sel-point', type: 'circle', source: 'ump-selected', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 8, 'circle-color': '#F59E0B', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
-
-  // Glow
-  map.addLayer({ id: 'ump-glow', type: 'circle', source: 'ump-glow',
-    paint: { 'circle-radius': 20, 'circle-color': '#FBBF24', 'circle-opacity': 0, 'circle-blur': 1 } })
-
-  // Vertex handle dots (for node editing)
-  map.addLayer({ id: 'ump-vertices', type: 'circle', source: 'ump-vertices',
-    paint: { 'circle-radius': 6, 'circle-color': '#fff', 'circle-stroke-width': 2.5, 'circle-stroke-color': '#2563EB', 'circle-stroke-opacity': 0.9 } })
-
-  // Measure line
-  map.addLayer({ id: 'ump-measure-line', type: 'line', source: 'ump-measure',
-    filter: ['==', '$type', 'LineString'],
-    paint: { 'line-color': '#F59E0B', 'line-width': 2, 'line-dasharray': [4, 3] } })
-  map.addLayer({ id: 'ump-measure-pts', type: 'circle', source: 'ump-measure',
-    filter: ['==', '$type', 'Point'],
-    paint: { 'circle-radius': 5, 'circle-color': '#F59E0B', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } })
+  return null
 }
 
-export function Canvas() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<mapboxgl.Map | null>(null)
-  const drawRef = useRef<InstanceType<typeof MapboxDraw> | null>(null)
-  const styleLoadedRef = useRef(false)
-  const mapStyleInitialized = useRef(false)
-  const activeToolRef = useRef('select')
-  const featuresRef = useRef<UMPFeature[]>([])
-  const activeStyleRef = useRef(useUIStore.getState().activeStyle)
-  const activeElementTypeRef = useRef<string | null>(null)
-  const vertexDragRef = useRef<{ featureId: string; path: number[] } | null>(null)
-  // Marquee box-select
-  const marqueeRef = useRef<{ startX: number; startY: number } | null>(null)
+// ── Main component ──────────────────────────────────────────────────────────
 
+export function Canvas() {
+  const outerRef = useRef<HTMLDivElement>(null)
+  const mapContainerRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<mapboxgl.Map | null>(null)
+  const styleLoadedRef = useRef(false)
+
+  // Map re-render trigger
+  const [mapVersion, setMapVersion] = useState(0)
   const [mapError, setMapError] = useState<string | null>(null)
   const [showLabels, setShowLabels] = useState(true)
   const [mapStyle, setMapStyle] = useState<keyof typeof MAP_STYLES>('satellite')
-  // Text placement
-  const [textPopup, setTextPopup] = useState<{ x: number; y: number; lngLat: [number, number] } | null>(null)
-  const [textInput, setTextInput] = useState('')
+
+  // Drawing state
+  const [drawNodes, setDrawNodes] = useState<[number, number][]>([])
+  const [cursorPos, setCursorPos] = useState<[number, number] | null>(null)
+
+  // Selection / node editing
+  const [draggingNode, setDraggingNode] = useState<{ featureId: string; path: number[] } | null>(null)
+  const [hoveredFeatureId, setHoveredFeatureId] = useState<string | null>(null)
+  const [hoveredVertIdx, setHoveredVertIdx] = useState<number | null>(null)
+
+  // Marquee
+  const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+  const mouseDownOnFeatureRef = useRef(false)
+
   // Measure
   const [measurePts, setMeasurePts] = useState<[number, number][]>([])
-  // Marquee overlay
-  const [marqueeBox, setMarqueeBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  // Extrude height for selected polygon
+
+  // Text
+  const [textPopup, setTextPopup] = useState<{ x: number; y: number; lngLat: [number, number] } | null>(null)
+  const [textInput, setTextInput] = useState('')
+
+  // Extrude
   const [extrudeHeight, setExtrudeHeight] = useState(0)
 
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
-  const { nightMode, mode3D, activeTool, activeStyle, activeElementType } = useUIStore()
-  const { addFeature, updateGeometry, deleteFeatures, setSelectedIds, features, selectedIds } = useCanvasStore()
+  const {
+    activeTool, setActiveTool, activeStyle, activeElementType,
+    nightMode, mode3D, showCanvasSearch, canvasSearchQuery,
+    setCanvasSearchQuery, toggleCanvasSearch,
+  } = useUIStore()
+  const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds } = useCanvasStore()
   const { layers } = useLayersStore()
-  const { showCanvasSearch, canvasSearchQuery, setCanvasSearchQuery, toggleCanvasSearch } = useUIStore()
 
+  // Refs for use in callbacks (avoid stale closures)
+  const activeToolRef = useRef(activeTool)
+  const featuresRef = useRef(features)
+  const selectedIdsRef = useRef(selectedIds)
+  const activeStyleRef = useRef(activeStyle)
+  const activeElementTypeRef = useRef(activeElementType)
+  const drawNodesRef = useRef(drawNodes)
   useEffect(() => { activeToolRef.current = activeTool }, [activeTool])
   useEffect(() => { featuresRef.current = features }, [features])
+  useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
   useEffect(() => { activeStyleRef.current = activeStyle }, [activeStyle])
   useEffect(() => { activeElementTypeRef.current = activeElementType }, [activeElementType])
+  useEffect(() => { drawNodesRef.current = drawNodes }, [drawNodes])
 
-  // When a polygon is selected and extrude tool is active, sync height from feature style
+  // Extrude sync
   useEffect(() => {
     if (activeTool === 'extrude' && selectedIds.length === 1) {
       const f = features.find(x => x.properties.id === selectedIds[0])
-      const h = f?.properties.style?.extrudeHeight ?? 0
-      setExtrudeHeight(h)
+      setExtrudeHeight(f?.properties.style?.extrudeHeight ?? 0)
     }
   }, [activeTool, selectedIds, features])
 
-  // Cmd+F
+  // ── Map initialization ─────────────────────────────────────────────────
   useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); toggleCanvasSearch() }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [toggleCanvasSearch])
-
-  // ── Init ─────────────────────────────────────────────────────────────────
-  const initMap = useCallback(() => {
-    if (!containerRef.current || mapRef.current) return
+    if (!mapContainerRef.current || mapRef.current) return
     const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
     if (!token) { setMapError('Missing VITE_MAPBOX_TOKEN in .env'); return }
     mapboxgl.accessToken = token
 
     const map = new mapboxgl.Map({
-      container: containerRef.current, style: MAP_STYLES.satellite,
-      center: INITIAL_CENTER, zoom: INITIAL_ZOOM,
-      antialias: true, fadeDuration: 0, preserveDrawingBuffer: true,
+      container: mapContainerRef.current,
+      style: MAP_STYLES.satellite,
+      center: INITIAL_CENTER,
+      zoom: INITIAL_ZOOM,
+      antialias: true,
+      fadeDuration: 0,
+      preserveDrawingBuffer: true,
     })
 
-    const draw = new MapboxDraw({
-      displayControlsDefault: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      styles: DRAW_STYLES as any[],
-    })
-
-    map.addControl(draw as unknown as mapboxgl.IControl)
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
     map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
 
     map.on('load', () => {
-      addFeatureLayers(map)
       styleLoadedRef.current = true
-      mapStyleInitialized.current = true
       setMapInstance(map)
       setMapError(null)
     })
@@ -229,283 +197,638 @@ export function Canvas() {
       if (msg.includes('401') || msg.includes('token') || msg.includes('Unauthorized'))
         setMapError('Invalid Mapbox token. Check your .env file.')
     })
-    map.on('style.load', () => {
-      styleLoadedRef.current = true
-      addFeatureLayers(map)
-      syncFeaturesTo(map)
-    })
-
-    // ── Select: click on feature ──────────────────────────────────────────
-    const selectLayers = ['ump-fill', 'ump-line', 'ump-point']
-    selectLayers.forEach(layer => {
-      map.on('click', layer, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined
-        if (!id) return
-        const tool = activeToolRef.current
-        if (tool === 'select' || tool === 'direct') {
-          setSelectedIds([id])
-          e.originalEvent.stopPropagation()
-        } else if (tool === 'extrude') {
-          setSelectedIds([id])
-          e.originalEvent.stopPropagation()
-        }
-      })
-      map.on('mouseenter', layer, () => {
-        const t = activeToolRef.current
-        if (t === 'select' || t === 'direct' || t === 'extrude') map.getCanvas().style.cursor = 'pointer'
-      })
-      map.on('mouseleave', layer, () => {
-        if (!vertexDragRef.current) map.getCanvas().style.cursor = activeToolRef.current === 'text' ? 'crosshair' : ''
-      })
-    })
-
-    // ── Background click ─────────────────────────────────────────────────
-    map.on('click', (e) => {
-      const tool = activeToolRef.current
-
-      if (tool === 'text') {
-        const rect = containerRef.current?.getBoundingClientRect()
-        setTextPopup({ x: e.point.x + (rect?.left ?? 0), y: e.point.y + (rect?.top ?? 0), lngLat: [e.lngLat.lng, e.lngLat.lat] })
-        return
-      }
-
-      if (tool === 'measure') {
-        const pt: [number, number] = [e.lngLat.lng, e.lngLat.lat]
-        setMeasurePts(prev => {
-          const next = [...prev, pt]
-          updateMeasureSource(map, next)
-          return next
-        })
-        return
-      }
-
-      // 'place' mode: click to place the active element as a point
-      if (tool === 'select' && activeElementTypeRef.current) {
-        const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(e => e.id === activeElementTypeRef.current)
-        if (el && el.drawMode === 'place') {
-          const feat = makeFeature(
-            { type: 'Point', coordinates: [e.lngLat.lng, e.lngLat.lat] },
-            el.id, el.category,
-            { style: activeStyleRef.current, label: el.label },
-          )
-          addFeature(feat)
-          return
-        }
-      }
-
-      if (tool === 'select' || tool === 'direct') setSelectedIds([])
-    })
-
-    // ── Vertex drag ───────────────────────────────────────────────────────
-    map.on('mousedown', 'ump-vertices', (e) => {
-      if (activeToolRef.current !== 'select') return
-      e.preventDefault()
-      const props = e.features?.[0]?.properties
-      if (!props) return
-      vertexDragRef.current = { featureId: props.featureId, path: JSON.parse(props.path as string) }
-      map.dragPan.disable()
-      map.getCanvas().style.cursor = 'crosshair'
-    })
-
-    map.on('mousemove', (e) => {
-      if (!vertexDragRef.current) return
-      const { featureId, path } = vertexDragRef.current
-      const feat = featuresRef.current.find(f => f.properties.id === featureId)
-      if (!feat) return
-      const newCoord: [number, number] = [e.lngLat.lng, e.lngLat.lat]
-      const updatedGeom = updateCoordInGeom(feat.geometry, path, newCoord)
-      const updatedFeat = { ...feat, geometry: updatedGeom } as UMPFeature
-      // Live preview: update map sources directly without React state
-      const src = map.getSource('ump-features') as mapboxgl.GeoJSONSource
-      const others = featuresRef.current.filter(f => f.properties.id !== featureId)
-      src?.setData({ type: 'FeatureCollection', features: [...others, updatedFeat] })
-      const vSrc = map.getSource('ump-vertices') as mapboxgl.GeoJSONSource
-      vSrc?.setData({ type: 'FeatureCollection', features: extractVertexFeatures(updatedFeat) })
-    })
-
-    map.on('mouseup', (e) => {
-      if (!vertexDragRef.current) return
-      const { featureId, path } = vertexDragRef.current
-      const feat = featuresRef.current.find(f => f.properties.id === featureId)
-      if (feat) updateGeometry(featureId, updateCoordInGeom(feat.geometry, path, [e.lngLat.lng, e.lngLat.lat]))
-      vertexDragRef.current = null
-      map.dragPan.enable()
-      map.getCanvas().style.cursor = 'pointer'
-    })
-
-    // ── Draw events ───────────────────────────────────────────────────────
-    type DrawEvent = { features: GeoJSON.Feature[] }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ma = map as any
-    ma.on('draw.create', (e: DrawEvent) => {
-      e.features.forEach(geom => {
-        const elType = activeElementTypeRef.current ?? 'generic'
-        // Find the element's category
-        const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
-        const cat = el?.category ?? 'custom'
-        const feat = makeFeature(geom.geometry, elType, cat, { style: activeStyleRef.current, label: el?.label ?? elType })
-        addFeature(feat)
-        draw.delete(geom.id as string)
-      })
-    })
-    ma.on('draw.update', (e: DrawEvent) => {
-      e.features.forEach(f => updateGeometry(f.id as string, f.geometry))
-    })
-    ma.on('draw.delete', (e: DrawEvent) => {
-      deleteFeatures(e.features.map(f => f.id as string))
-    })
-
+    map.on('style.load', () => { styleLoadedRef.current = true })
     map.on('move', () => {
+      setMapVersion(v => v + 1)
       const c = map.getCenter()
-      setCenter([c.lng, c.lat]); setZoom(map.getZoom()); setRotation(map.getBearing()); setPitch(map.getPitch())
+      setCenter([c.lng, c.lat])
+      setZoom(map.getZoom())
+      setRotation(map.getBearing())
+      setPitch(map.getPitch())
     })
 
     mapRef.current = map
-    drawRef.current = draw
-  }, [setMapInstance, setZoom, setCenter, setRotation, setPitch, addFeature, updateGeometry, deleteFeatures, setSelectedIds])
-
-  useEffect(() => {
-    initMap()
-    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; drawRef.current = null; setMapInstance(null) } }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { map.remove(); mapRef.current = null; setMapInstance(null) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Tool mode switching ────────────────────────────────────────────────
-  useEffect(() => {
-    const draw = drawRef.current
-    const map = mapRef.current
-    if (!draw || !map) return
-    const canvas = map.getCanvas()
-    canvas.style.cursor = activeTool === 'text' ? 'crosshair' : activeTool === 'measure' ? 'crosshair' : ''
-
-    const DRAW_MODES: Record<string, string> = {
-      select: 'simple_select', direct: 'simple_select',
-      pen: 'draw_polygon', line: 'draw_line_string',
-      rect: 'draw_polygon', ellipse: 'draw_polygon', polygon: 'draw_polygon',
-      text: 'simple_select', extrude: 'simple_select', measure: 'simple_select',
-      addNode: 'direct_select', delNode: 'direct_select',
-    }
-    try { draw.changeMode(DRAW_MODES[activeTool] ?? 'simple_select') } catch { /* ignore */ }
-
-    // Clear measure when switching away
-    if (activeTool !== 'measure') {
-      setMeasurePts([])
-      const mSrc = map.getSource('ump-measure') as mapboxgl.GeoJSONSource
-      mSrc?.setData({ type: 'FeatureCollection', features: [] })
-    }
-  }, [activeTool])
-
-  // ── Sync features + vertices ───────────────────────────────────────────
-  function syncFeaturesTo(map: mapboxgl.Map) {
-    const hidden = new Set(layers.filter(l => !l.visible).map(l => l.id))
-    const q = canvasSearchQuery.trim().toLowerCase()
-    const visible = features.filter(f => !hidden.has(f.properties.layerGroup))
-    const hits = q ? visible.filter(f => f.properties.label.toLowerCase().includes(q)) : []
-    const selected = visible.filter(f => selectedIds.includes(f.properties.id) || hits.some(h => h.properties.id === f.properties.id))
-    const extruded = visible.filter(f => {
-      const h = f.properties.style?.extrudeHeight ?? 0
-      return h > 0 && f.geometry.type === 'Polygon'
-    })
-
-    const set = (id: string, feats: GeoJSON.Feature[]) => {
-      const s = map.getSource(id) as mapboxgl.GeoJSONSource
-      s?.setData({ type: 'FeatureCollection', features: feats })
-    }
-    set('ump-features', visible)
-    set('ump-selected', selected)
-    set('ump-extruded', extruded)
-    set('ump-glow', visible.filter(f => f.geometry.type === 'Point'))
-    set('ump-labels', visible)
-
-    // Vertex handles for selected feature (select tool only)
-    if ((activeTool === 'select' || activeTool === 'direct') && selectedIds.length === 1) {
-      const selFeat = visible.find(f => f.properties.id === selectedIds[0])
-      set('ump-vertices', selFeat ? extractVertexFeatures(selFeat) : [])
-    } else {
-      set('ump-vertices', [])
-    }
-  }
-
+  // ── Map style switch ─────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!map || !styleLoadedRef.current) return
-    syncFeaturesTo(map)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [features, selectedIds, layers, canvasSearchQuery, activeTool])
-
-  // ── Map style ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!mapStyleInitialized.current) return
-    const map = mapRef.current; if (!map) return
     styleLoadedRef.current = false
     map.setStyle(MAP_STYLES[mapStyle])
   }, [mapStyle])
 
-  // ── 3D buildings ──────────────────────────────────────────────────────
+  // ── 3D buildings ─────────────────────────────────────────────────────────
   useEffect(() => {
-    const map = mapRef.current; if (!map || !styleLoadedRef.current) return
+    const map = mapRef.current
+    if (!map || !styleLoadedRef.current) return
     if (mode3D) {
       map.easeTo({ pitch: 45, duration: 600 })
       if (!map.getLayer('3d-buildings'))
-        map.addLayer({ id: '3d-buildings', source: 'composite', 'source-layer': 'building', filter: ['==', 'extrude', 'true'], type: 'fill-extrusion', minzoom: 14,
-          paint: { 'fill-extrusion-color': '#aaa', 'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.05, ['get', 'height']], 'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0.6 } })
+        map.addLayer({
+          id: '3d-buildings', source: 'composite', 'source-layer': 'building',
+          filter: ['==', 'extrude', 'true'], type: 'fill-extrusion', minzoom: 14,
+          paint: {
+            'fill-extrusion-color': '#aaa',
+            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.05, ['get', 'height']],
+            'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0.6,
+          },
+        })
     } else {
       map.easeTo({ pitch: 0, duration: 600 })
       if (map.getLayer('3d-buildings')) map.removeLayer('3d-buildings')
     }
   }, [mode3D])
 
-  // ── Night glow ─────────────────────────────────────────────────────────
+  // ── Pan/zoom control per tool ─────────────────────────────────────────────
   useEffect(() => {
-    const map = mapRef.current; if (!map || !styleLoadedRef.current) return
-    if (map.getLayer('ump-glow')) map.setPaintProperty('ump-glow', 'circle-opacity', nightMode ? 0.35 : 0)
-  }, [nightMode])
+    const map = mapRef.current
+    if (!map) return
+    const drawingTools = ['pen', 'line', 'rect', 'ellipse', 'polygon', 'text', 'measure']
+    if (drawingTools.includes(activeTool)) {
+      map.dragPan.disable()
+    } else {
+      map.dragPan.enable()
+    }
+  }, [activeTool])
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
-  function updateMeasureSource(map: mapboxgl.Map, pts: [number, number][]) {
-    const features: GeoJSON.Feature[] = pts.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: {} }))
-    if (pts.length > 1) features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts }, properties: {} })
-    const src = map.getSource('ump-measure') as mapboxgl.GeoJSONSource
-    src?.setData({ type: 'FeatureCollection', features })
+  // Cancel drawing state on tool switch
+  useEffect(() => {
+    setDrawNodes([])
+    setCursorPos(null)
+    if (activeTool !== 'measure') setMeasurePts([])
+    setTextPopup(null)
+  }, [activeTool])
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    function down(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (!e.metaKey && !e.ctrlKey) {
+        switch (e.key.toLowerCase()) {
+          case 'v': setActiveTool('select'); break
+          case 'a': setActiveTool('direct'); break
+          case 'p': setActiveTool('pen'); break
+          case 'l': setActiveTool('line'); break
+          case 'r': setActiveTool('rect'); break
+          case 'e': setActiveTool('ellipse'); break
+          case 'g': setActiveTool('polygon'); break
+          case 't': setActiveTool('text'); break
+          case 'x': setActiveTool('extrude'); break
+          case 'm': setActiveTool('measure'); break
+          case 'escape':
+            setDrawNodes([])
+            setCursorPos(null)
+            setMeasurePts([])
+            setActiveTool('select')
+            setSelectedIds([])
+            break
+          case 'delete':
+          case 'backspace':
+            if (selectedIdsRef.current.length) deleteFeatures(selectedIdsRef.current)
+            break
+        }
+      }
+      if (e.metaKey || e.ctrlKey) {
+        switch (e.key) {
+          case 'z':
+            e.preventDefault()
+            e.shiftKey ? useCanvasStore.getState().redo() : useCanvasStore.getState().undo()
+            break
+          case 'a':
+            e.preventDefault()
+            setSelectedIds(featuresRef.current.map(f => f.properties.id))
+            break
+          case 'f':
+            e.preventDefault()
+            toggleCanvasSearch()
+            break
+        }
+      }
+    }
+    window.addEventListener('keydown', down)
+    return () => window.removeEventListener('keydown', down)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Canvas coordinates ────────────────────────────────────────────────────
+  const getCanvasXY = useCallback((e: React.MouseEvent): [number, number] => {
+    const rect = outerRef.current?.getBoundingClientRect()
+    if (!rect) return [0, 0]
+    return [e.clientX - rect.left, e.clientY - rect.top]
+  }, [])
+
+  // ── Mouse events ──────────────────────────────────────────────────────────
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    const map = mapRef.current
+    if (!map) return
+    const [sx, sy] = getCanvasXY(e)
+    const tool = activeToolRef.current
+
+    mouseDownOnFeatureRef.current = false
+
+    if (tool === 'select' || tool === 'direct') {
+      // Check vertex handles first
+      const selId = selectedIdsRef.current[0]
+      if (selId) {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat) {
+          const verts = getVertices(selFeat.geometry)
+          for (const v of verts) {
+            const [vx, vy] = lngLatToScreen(map, v.coord)
+            if (Math.hypot(vx - sx, vy - sy) < 9) {
+              setDraggingNode({ featureId: selId, path: v.path })
+              mouseDownOnFeatureRef.current = true
+              e.stopPropagation()
+              return
+            }
+          }
+        }
+      }
+      // Check feature hit
+      const visible = featuresRef.current.filter(
+        f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible)
+      )
+      const hit = hitTestFeatures(map, visible, sx, sy)
+      if (hit) {
+        mouseDownOnFeatureRef.current = true
+        // Don't select here; select on click (to distinguish drag vs click)
+        return
+      }
+      // Start marquee
+      setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
+    }
+  }, [getCanvasXY, layers])
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const map = mapRef.current
+    if (!map) return
+    const [sx, sy] = getCanvasXY(e)
+    const lngLat = screenToLngLat(map, sx, sy)
+    setCursorPos([sx, sy])
+
+    // Node dragging
+    if (draggingNode) {
+      const feat = featuresRef.current.find(f => f.properties.id === draggingNode.featureId)
+      if (feat) updateGeometry(draggingNode.featureId, updateCoordInGeom(feat.geometry, draggingNode.path, lngLat))
+      return
+    }
+
+    // Marquee
+    if (marquee) {
+      setMarquee(prev => prev ? { ...prev, x2: sx, y2: sy } : null)
+      return
+    }
+
+    // Hover detection for cursor changes
+    if (activeToolRef.current === 'select' || activeToolRef.current === 'direct') {
+      // Check vertex hover
+      const selId = selectedIdsRef.current[0]
+      if (selId) {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat) {
+          const verts = getVertices(selFeat.geometry)
+          const found = verts.findIndex(v => {
+            const [vx, vy] = lngLatToScreen(map, v.coord)
+            return Math.hypot(vx - sx, vy - sy) < 9
+          })
+          setHoveredVertIdx(found >= 0 ? found : null)
+          if (found >= 0) { setHoveredFeatureId(null); return }
+        }
+      }
+      setHoveredVertIdx(null)
+      const visible = featuresRef.current.filter(
+        f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible)
+      )
+      const hit = hitTestFeatures(map, visible, sx, sy)
+      setHoveredFeatureId(hit?.properties.id ?? null)
+    }
+  }, [getCanvasXY, draggingNode, marquee, updateGeometry, layers])
+
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    const map = mapRef.current
+    if (!map) return
+    const [sx, sy] = getCanvasXY(e)
+
+    if (draggingNode) {
+      setDraggingNode(null)
+      return
+    }
+
+    if (marquee) {
+      const mx1 = Math.min(marquee.x1, marquee.x2)
+      const mx2 = Math.max(marquee.x1, marquee.x2)
+      const my1 = Math.min(marquee.y1, marquee.y2)
+      const my2 = Math.max(marquee.y1, marquee.y2)
+      if (mx2 - mx1 > 4 || my2 - my1 > 4) {
+        const selected = featuresRef.current.filter(f => {
+          const verts = getVertices(f.geometry)
+          return verts.some(v => {
+            const [vx, vy] = lngLatToScreen(map, v.coord)
+            return vx >= mx1 && vx <= mx2 && vy >= my1 && vy <= my2
+          })
+        })
+        if (selected.length) setSelectedIds(selected.map(f => f.properties.id))
+      }
+      setMarquee(null)
+      return
+    }
+
+    // Unused — suppress lint warning
+    void sx; void sy
+  }, [getCanvasXY, draggingNode, marquee, setSelectedIds])
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    const map = mapRef.current
+    if (!map) return
+    // Skip if we were dragging a marquee
+    if (marquee) return
+    if (draggingNode) return
+
+    const [sx, sy] = getCanvasXY(e)
+    const lngLat = screenToLngLat(map, sx, sy)
+    const tool = activeToolRef.current
+
+    if (tool === 'text') {
+      setTextPopup({ x: sx, y: sy, lngLat })
+      return
+    }
+
+    if (tool === 'measure') {
+      setMeasurePts(prev => [...prev, lngLat])
+      return
+    }
+
+    if (tool === 'select' || tool === 'direct') {
+      const visible = featuresRef.current.filter(
+        f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible)
+      )
+      const hit = hitTestFeatures(map, visible, sx, sy)
+
+      if (hit) {
+        if (e.shiftKey) {
+          const ids = selectedIdsRef.current
+          setSelectedIds(ids.includes(hit.properties.id)
+            ? ids.filter(id => id !== hit.properties.id)
+            : [...ids, hit.properties.id])
+        } else {
+          setSelectedIds([hit.properties.id])
+        }
+        return
+      }
+
+      // Click-to-place for 'place' drawMode elements
+      const elType = activeElementTypeRef.current
+      if (elType) {
+        const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
+        if (el?.drawMode === 'place') {
+          addFeature(makeFeature(
+            { type: 'Point', coordinates: lngLat },
+            el.id, el.category,
+            { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
+          ))
+          return
+        }
+      }
+
+      setSelectedIds([])
+      return
+    }
+
+    if (tool === 'line') {
+      setDrawNodes(prev => [...prev, lngLat])
+      return
+    }
+
+    if (tool === 'polygon' || tool === 'pen') {
+      const prev = drawNodesRef.current
+      // Check close-to-first-node
+      if (prev.length >= 3) {
+        const [fx, fy] = lngLatToScreen(map, prev[0])
+        if (Math.hypot(fx - sx, fy - sy) < 12) {
+          finishPolygon(prev)
+          return
+        }
+      }
+      setDrawNodes(p => [...p, lngLat])
+      return
+    }
+
+    if (tool === 'rect') {
+      setDrawNodes(prev => {
+        if (prev.length === 0) return [lngLat]
+        finishRect(prev[0], lngLat)
+        return []
+      })
+      return
+    }
+
+    if (tool === 'ellipse') {
+      setDrawNodes(prev => {
+        if (prev.length === 0) return [lngLat]
+        finishEllipse(prev[0], lngLat)
+        return []
+      })
+      return
+    }
+  }, [getCanvasXY, marquee, draggingNode, addFeature, setSelectedIds, layers])
+
+  const handleDoubleClick = useCallback(() => {
+    const tool = activeToolRef.current
+    const nodes = drawNodesRef.current
+    if (tool === 'line' && nodes.length >= 2) { finishLine(nodes); return }
+    if ((tool === 'polygon' || tool === 'pen') && nodes.length >= 3) { finishPolygon(nodes); return }
+  }, [])
+
+  // ── Finish drawing ────────────────────────────────────────────────────────
+  function makeElFeature(geom: GeoJSON.Geometry, fallbackType: string, fallbackCat: string) {
+    const elType = activeElementTypeRef.current ?? fallbackType
+    const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
+    return makeFeature(geom, elType, el?.category ?? fallbackCat, {
+      style: { ...activeStyleRef.current, ...(el?.defaultStyle ?? {}) },
+      label: el?.label ?? fallbackType,
+    })
   }
 
-  function placeText() {
-    if (!textPopup || !textInput.trim()) { setTextPopup(null); setTextInput(''); return }
-    const feat = makeFeature(
-      { type: 'Point', coordinates: textPopup.lngLat },
-      'text', 'Annotations',
-      { label: textInput.trim(), style: { ...activeStyle, textContent: textInput.trim() } as typeof activeStyle },
-    )
-    addFeature(feat); setTextPopup(null); setTextInput('')
+  function finishLine(nodes: [number, number][]) {
+    if (nodes.length < 2) return
+    addFeature(makeElFeature({ type: 'LineString', coordinates: nodes }, 'line', 'custom'))
+    setDrawNodes([])
+  }
+
+  function finishPolygon(nodes: [number, number][]) {
+    if (nodes.length < 3) return
+    addFeature(makeElFeature({ type: 'Polygon', coordinates: [[...nodes, nodes[0]]] }, 'polygon', 'custom'))
+    setDrawNodes([])
+  }
+
+  function finishRect(p1: [number, number], p2: [number, number]) {
+    const coords: [number, number][] = [p1, [p2[0], p1[1]], p2, [p1[0], p2[1]], p1]
+    addFeature(makeElFeature({ type: 'Polygon', coordinates: [coords] }, 'rect', 'custom'))
+    setDrawNodes([])
+  }
+
+  function finishEllipse(center: [number, number], edge: [number, number]) {
+    const map = mapRef.current
+    if (!map) return
+    const [cx, cy] = lngLatToScreen(map, center)
+    const [ex, ey] = lngLatToScreen(map, edge)
+    const rx = Math.abs(ex - cx), ry = Math.abs(ey - cy)
+    const pts: [number, number][] = Array.from({ length: 65 }, (_, i) => {
+      const a = (i / 64) * Math.PI * 2
+      return screenToLngLat(map, cx + rx * Math.cos(a), cy + ry * Math.sin(a))
+    })
+    addFeature(makeElFeature({ type: 'Polygon', coordinates: [pts] }, 'ellipse', 'custom'))
+    setDrawNodes([])
   }
 
   function applyExtrude(height: number) {
     if (!selectedIds[0]) return
     const f = features.find(x => x.properties.id === selectedIds[0])
     if (!f) return
-    // Store height in style properties
-    const newStyle = { ...f.properties.style, extrudeHeight: height } as typeof f.properties.style
-    const updated = { ...f, properties: { ...f.properties, style: newStyle } } as UMPFeature
-    const { updateFeature } = useCanvasStore.getState()
-    updateFeature(updated.properties.id, { style: updated.properties.style })
+    updateFeature(f.properties.id, { style: { ...f.properties.style, extrudeHeight: height } })
   }
 
-  // Measure distances
-  const measureDistances = measurePts.length > 1 ? measurePts.slice(1).map((p, i) => {
-    const d = distFt(measurePts[i], p)
-    const mid: [number, number] = [(measurePts[i][0] + p[0]) / 2, (measurePts[i][1] + p[1]) / 2]
-    return { d, mid, screen: mapRef.current?.project(mid as [number, number]) }
-  }) : []
-  const totalDist = measurePts.length > 1 ? measurePts.slice(1).reduce((acc, p, i) => acc + distFt(measurePts[i], p), 0) : 0
+  // ── Cursor ────────────────────────────────────────────────────────────────
+  const CURSORS: Record<string, string> = {
+    select: 'default', direct: 'default', pen: 'crosshair', line: 'crosshair',
+    rect: 'crosshair', ellipse: 'crosshair', polygon: 'crosshair',
+    text: 'text', measure: 'crosshair', extrude: 'default',
+  }
+  let cursor = CURSORS[activeTool] ?? 'default'
+  if (draggingNode) cursor = 'crosshair'
+  else if (hoveredVertIdx !== null) cursor = 'grab'
+  else if (hoveredFeatureId && (activeTool === 'select' || activeTool === 'direct')) cursor = 'pointer'
 
-  const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
+  // ── SVG rendering ─────────────────────────────────────────────────────────
+  const map = mapRef.current
+  const visibleFeatures = map
+    ? features.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
+    : []
+
+  function renderFeatures() {
+    if (!map) return null
+    return visibleFeatures.map(f => {
+      const style = f.properties.style
+      const isSelected = selectedIds.includes(f.properties.id)
+      const isHovered = hoveredFeatureId === f.properties.id
+      const selColor = '#F59E0B'
+      const strokeColor = isSelected ? selColor : isHovered ? '#60A5FA' : (style.strokeColor ?? '#2563EB')
+      const dash = style.lineType === 'dashed' ? '8 5' : style.lineType === 'dotted' ? '2 4' : undefined
+
+      if (f.geometry.type === 'Point') {
+        const [px, py] = lngLatToScreen(map, f.geometry.coordinates as [number, number])
+        const isText = f.properties.elementType === 'text'
+        if (isText) {
+          const ts = f.properties.style as typeof style & { textContent?: string }
+          return (
+            <text key={f.properties.id} x={px} y={py} textAnchor="middle" dominantBaseline="middle"
+              fill={strokeColor} fontSize={style.fontSize ?? 16} fontFamily={style.fontFamily ?? 'Inter'}
+              style={{ pointerEvents: 'none', userSelect: 'none' }}>
+              {ts.textContent ?? f.properties.label}
+            </text>
+          )
+        }
+        // Point symbol
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <circle cx={px} cy={py} r={8} fill={style.fillColor ?? '#2563EB'} stroke={strokeColor} strokeWidth={isSelected ? 2.5 : 1.5} />
+            {isSelected && <circle cx={px} cy={py} r={12} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+
+      const path = geomToScreenPath(map, f.geometry)
+      const isLine = f.geometry.type === 'LineString'
+      const sw = style.strokeWidth ?? 2
+
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          {!isLine && (
+            <path d={path} fill={style.fillColor ?? '#2563EB'}
+              fillOpacity={(style.fillOpacity ?? 70) / 100} fillRule="evenodd" />
+          )}
+          <path d={path} fill="none" stroke={strokeColor}
+            strokeWidth={isSelected ? sw + 1.5 : sw}
+            strokeLinecap={(['butt','round','square'].includes(style.lineCap ?? '') ? style.lineCap : 'round') as 'butt' | 'round' | 'square'}
+            strokeLinejoin={(['miter','round','bevel'].includes(style.lineJoin ?? '') ? style.lineJoin : 'round') as 'miter' | 'round' | 'bevel'}
+            strokeDasharray={dash} />
+        </g>
+      )
+    })
+  }
+
+  function renderActiveDraw() {
+    if (!map || !cursorPos) return null
+    const [cx, cy] = cursorPos
+    const tool = activeTool
+
+    if ((tool === 'pen' || tool === 'polygon') && drawNodes.length > 0) {
+      const pts = drawNodes.map(n => lngLatToScreen(map, n))
+      const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          <path d={`${d} L ${cx} ${cy}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" opacity={0.85} />
+          {drawNodes.length >= 3 && (
+            <line x1={cx} y1={cy} x2={pts[0][0]} y2={pts[0][1]} stroke="#2563EB" strokeWidth={1} strokeDasharray="4 4" opacity={0.4} />
+          )}
+          {pts.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={4} fill="white" stroke="#2563EB" strokeWidth={1.5} />
+          ))}
+          {drawNodes.length >= 3 && (
+            <circle cx={pts[0][0]} cy={pts[0][1]} r={9} fill="none" stroke="#2563EB" strokeWidth={1.5} opacity={0.55} />
+          )}
+        </g>
+      )
+    }
+
+    if (tool === 'line' && drawNodes.length > 0) {
+      const pts = drawNodes.map(n => lngLatToScreen(map, n))
+      const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          <path d={`${d} L ${cx} ${cy}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" />
+          {pts.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={4} fill="white" stroke="#2563EB" strokeWidth={1.5} />
+          ))}
+        </g>
+      )
+    }
+
+    if (tool === 'rect' && drawNodes.length === 1) {
+      const [x1, y1] = lngLatToScreen(map, drawNodes[0])
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          <rect x={Math.min(x1, cx)} y={Math.min(y1, cy)} width={Math.abs(cx - x1)} height={Math.abs(cy - y1)}
+            fill="rgba(37,99,235,0.08)" stroke="#2563EB" strokeWidth={1.5} strokeDasharray="5 3" />
+        </g>
+      )
+    }
+
+    if (tool === 'ellipse' && drawNodes.length === 1) {
+      const [x1, y1] = lngLatToScreen(map, drawNodes[0])
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          <ellipse cx={x1} cy={y1} rx={Math.abs(cx - x1)} ry={Math.abs(cy - y1)}
+            fill="rgba(37,99,235,0.08)" stroke="#2563EB" strokeWidth={1.5} strokeDasharray="5 3" />
+        </g>
+      )
+    }
+
+    return null
+  }
+
+  function renderSelection() {
+    if (!map || selectedIds.length === 0) return null
+    return selectedIds.map(id => {
+      const f = features.find(x => x.properties.id === id)
+      if (!f) return null
+      const verts = getVertices(f.geometry)
+      if (verts.length === 0) return null
+      const screenVerts = verts.map(v => lngLatToScreen(map, v.coord))
+
+      return (
+        <g key={`sel-${id}`} style={{ pointerEvents: 'none' }}>
+          {/* Bounding box */}
+          {(() => {
+            const bb = screenBbox(screenVerts)
+            if (bb.w < 2 && bb.h < 2) return null
+            return (
+              <rect x={bb.x - 6} y={bb.y - 6} width={bb.w + 12} height={bb.h + 12}
+                fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
+            )
+          })()}
+          {/* Vertex handles */}
+          {screenVerts.map(([vx, vy], i) => (
+            <g key={i}>
+              <circle cx={vx} cy={vy} r={4.5} fill="white" stroke="#2563EB" strokeWidth={1.5}
+                style={{ filter: hoveredVertIdx === i ? 'drop-shadow(0 0 3px #2563EB)' : undefined }} />
+            </g>
+          ))}
+        </g>
+      )
+    })
+  }
+
+  function renderMeasure() {
+    if (!map || activeTool !== 'measure') return null
+    const pts = measurePts.map(p => lngLatToScreen(map, p))
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        {pts.length > 1 && (
+          <path d={pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')}
+            fill="none" stroke="#F59E0B" strokeWidth={2} strokeDasharray="5 3" />
+        )}
+        {cursorPos && pts.length > 0 && (
+          <line x1={pts[pts.length - 1][0]} y1={pts[pts.length - 1][1]}
+            x2={cursorPos[0]} y2={cursorPos[1]}
+            stroke="#F59E0B" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.6} />
+        )}
+        {pts.map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r={5} fill="#F59E0B" stroke="white" strokeWidth={1.5} />
+        ))}
+      </g>
+    )
+  }
+
+  // ── Measure labels ────────────────────────────────────────────────────────
+  const measureDistances = map && measurePts.length > 1
+    ? measurePts.slice(1).map((p, i) => {
+        const d = haversineFt(measurePts[i], p)
+        const mid: [number, number] = [(measurePts[i][0] + p[0]) / 2, (measurePts[i][1] + p[1]) / 2]
+        return { d, screen: lngLatToScreen(map, mid) }
+      })
+    : []
+  const totalDist = measurePts.reduce((acc, p, i) => i === 0 ? 0 : acc + haversineFt(measurePts[i - 1], p), 0)
+
   const selectedPolygon = activeTool === 'extrude' && selectedIds.length === 1
     ? features.find(f => f.properties.id === selectedIds[0] && f.geometry.type === 'Polygon')
     : null
 
+  const token = (import.meta.env.VITE_MAPBOX_TOKEN ?? '').replace(/^﻿/, '').trim()
+
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <div ref={outerRef} style={{ position: 'absolute', inset: 0 }}>
+      {/* Mapbox basemap */}
+      <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0 }} />
+
+      {/* SVG feature overlay — purely visual, pointer-events none */}
+      {map && (
+        <svg
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}
+          width="100%" height="100%"
+        >
+          <g id="elements-layer">{renderFeatures()}</g>
+          <g id="active-draw-layer">{renderActiveDraw()}</g>
+          <g id="selection-layer">{renderSelection()}</g>
+          <g id="measure-layer">{renderMeasure()}</g>
+
+          {/* Marquee selection box */}
+          {marquee && (
+            <rect
+              x={Math.min(marquee.x1, marquee.x2)} y={Math.min(marquee.y1, marquee.y2)}
+              width={Math.abs(marquee.x2 - marquee.x1)} height={Math.abs(marquee.y2 - marquee.y1)}
+              fill="rgba(37,99,235,0.07)" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" />
+          )}
+        </svg>
+      )}
+
+      {/* Interaction capture — on top of SVG, below UI panels */}
+      <div
+        style={{ position: 'absolute', inset: 0, cursor, zIndex: 10 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+      />
+
+      {/* ── UI overlays ──────────────────────────────────────────────────── */}
 
       {mapError && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15,23,42,0.85)', zIndex: 50 }}>
@@ -517,22 +840,34 @@ export function Canvas() {
         </div>
       )}
 
-      {nightMode && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'rgba(10,15,35,0.52)', zIndex: 5 }} />}
+      {nightMode && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'rgba(10,15,35,0.52)', zIndex: 5 }} />
+      )}
 
-      {/* ── Right-side controls ────────────────────────────────────────── */}
+      {/* Map controls (top-right) */}
       <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
         <MapGeocoder token={token} mapRef={mapRef} />
         <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--color-bg-panel)', borderRadius: 8, border: '1px solid var(--color-border)', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
-          {(Object.keys(MAP_STYLES) as (keyof typeof MAP_STYLES)[]).map(k => <MapStyleBtn key={k} styleKey={k} active={mapStyle === k} onClick={() => setMapStyle(k)} />)}
+          {(Object.keys(MAP_STYLES) as (keyof typeof MAP_STYLES)[]).map(k => (
+            <MapStyleBtn key={k} styleKey={k} active={mapStyle === k} onClick={() => setMapStyle(k)} />
+          ))}
           <div style={{ height: 1, background: 'var(--color-border)' }} />
-          <button onClick={() => {
-            const map = mapRef.current; if (!map) return
-            setShowLabels(prev => { const n = !prev; map.getStyle()?.layers?.forEach(l => { if (l.type === 'symbol') map.setLayoutProperty(l.id, 'visibility', n ? 'visible' : 'none') }); return n })
-          }}
+          <button
+            onClick={() => {
+              const m = mapRef.current
+              if (!m) return
+              setShowLabels(prev => {
+                const n = !prev
+                m.getStyle()?.layers?.forEach(l => {
+                  if (l.type === 'symbol') m.setLayoutProperty(l.id, 'visibility', n ? 'visible' : 'none')
+                })
+                return n
+              })
+            }}
             title={showLabels ? 'Hide labels' : 'Show labels'}
             style={{ width: 36, height: 32, border: 'none', cursor: 'pointer', background: showLabels ? 'transparent' : 'var(--color-accent-subtle)', color: showLabels ? 'var(--color-text-muted)' : 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M4 12h10M4 17h7" /></svg>
           </button>
         </div>
       </div>
@@ -541,44 +876,66 @@ export function Canvas() {
 
       {/* Canvas search */}
       {showCanvasSearch && (
-        <CanvasSearchBar query={canvasSearchQuery} onQuery={setCanvasSearchQuery} onClose={toggleCanvasSearch} features={features} onSelect={id => setSelectedIds([id])} />
+        <CanvasSearchBar
+          query={canvasSearchQuery} onQuery={setCanvasSearchQuery}
+          onClose={toggleCanvasSearch} features={features}
+          onSelect={id => setSelectedIds([id])} />
       )}
 
-      {/* Pen / draw tool tip */}
-      {(activeTool === 'pen' || activeTool === 'line' || activeTool === 'rect' || activeTool === 'ellipse' || activeTool === 'polygon') && (
-        <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.65)', color: '#fff', borderRadius: 16, padding: '4px 14px', fontSize: 11, pointerEvents: 'none', zIndex: 10, backdropFilter: 'blur(6px)' }}>
-          {activeTool === 'line' ? 'Click to add points · Double-click to finish' : 'Click to add points · Double-click to close shape · Esc to cancel'}
+      {/* Draw hint */}
+      {['pen', 'line', 'rect', 'ellipse', 'polygon'].includes(activeTool) && (
+        <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.65)', color: '#fff', borderRadius: 16, padding: '4px 14px', fontSize: 11, pointerEvents: 'none', zIndex: 20, backdropFilter: 'blur(6px)', whiteSpace: 'nowrap' }}>
+          {activeTool === 'line'
+            ? 'Click to add points · Double-click to finish · Esc to cancel'
+            : activeTool === 'rect' || activeTool === 'ellipse'
+              ? 'Click first corner · Click second corner to finish · Esc to cancel'
+              : 'Click to add points · Click first point to close · Double-click to finish · Esc to cancel'}
         </div>
       )}
 
       {/* Text popup */}
       {textPopup && (
         <div style={{ position: 'absolute', left: textPopup.x - 130, top: textPopup.y - 48, zIndex: 40, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input autoFocus value={textInput} onChange={e => setTextInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') placeText(); if (e.key === 'Escape') { setTextPopup(null); setTextInput('') } }}
-            placeholder="Type text…" style={{ width: 180, height: 28, padding: '0 8px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 5, background: 'var(--color-bg-elevated)', color: 'var(--color-text)', outline: 'none' }} />
-          <button onClick={placeText} style={{ height: 28, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 5, border: 'none', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer' }}>Place</button>
+          <input
+            autoFocus value={textInput}
+            onChange={e => setTextInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && textInput.trim()) {
+                addFeature(makeFeature(
+                  { type: 'Point', coordinates: textPopup.lngLat }, 'text', 'annotations',
+                  { label: textInput.trim(), style: { ...activeStyle, textContent: textInput.trim() } as typeof activeStyle },
+                ))
+                setTextPopup(null); setTextInput('')
+              }
+              if (e.key === 'Escape') { setTextPopup(null); setTextInput('') }
+            }}
+            placeholder="Type text…"
+            style={{ width: 180, height: 28, padding: '0 8px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 5, background: 'var(--color-bg-elevated)', color: 'var(--color-text)', outline: 'none' }} />
+          <button
+            onClick={() => {
+              if (textInput.trim()) addFeature(makeFeature(
+                { type: 'Point', coordinates: textPopup.lngLat }, 'text', 'annotations',
+                { label: textInput.trim(), style: { ...activeStyle, textContent: textInput.trim() } as typeof activeStyle },
+              ))
+              setTextPopup(null); setTextInput('')
+            }}
+            style={{ height: 28, padding: '0 10px', fontSize: 12, fontWeight: 600, borderRadius: 5, border: 'none', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer' }}>Place</button>
         </div>
       )}
 
-      {/* Measure overlay */}
+      {/* Measure labels */}
       {activeTool === 'measure' && (
         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 15 }}>
-          {measureDistances.map((seg, i) => seg.screen && (
-            <div key={i} style={{ position: 'absolute', left: seg.screen.x, top: seg.screen.y, transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.7)', color: '#F59E0B', borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          {measureDistances.map((seg, i) => (
+            <div key={i} style={{ position: 'absolute', left: seg.screen[0], top: seg.screen[1], transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.7)', color: '#F59E0B', borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
               {fmtDist(seg.d)}
             </div>
           ))}
-          {measurePts.length > 1 && (
-            <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.75)', color: '#fff', borderRadius: 16, padding: '4px 16px', fontSize: 12, fontWeight: 600 }}>
-              Total: {fmtDist(totalDist)} · Click to add points · Esc to clear
-            </div>
-          )}
-          {measurePts.length === 0 && (
-            <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.65)', color: '#fff', borderRadius: 16, padding: '4px 16px', fontSize: 11, backdropFilter: 'blur(6px)' }}>
-              Click points on the map to measure distance
-            </div>
-          )}
+          <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.75)', color: '#fff', borderRadius: 16, padding: '4px 16px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {measurePts.length === 0
+              ? 'Click to start measuring'
+              : `Total: ${fmtDist(totalDist)} · Click to add points · Esc to clear`}
+          </div>
         </div>
       )}
 
@@ -588,73 +945,83 @@ export function Canvas() {
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>Extrude to 3D</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <input type="range" min={0} max={200} step={1} value={extrudeHeight}
-              onChange={e => { const h = Number(e.target.value); setExtrudeHeight(h); applyExtrude(h) }}
+              onChange={e => { const h = +e.target.value; setExtrudeHeight(h); applyExtrude(h) }}
               style={{ flex: 1 }} />
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)', minWidth: 50 }}>{extrudeHeight} m</span>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {[10, 20, 30, 50, 100].map(h => (
-              <button key={h} onClick={() => { setExtrudeHeight(h); applyExtrude(h) }} style={{ flex: 1, height: 24, fontSize: 10, fontWeight: 600, borderRadius: 4, border: '1px solid var(--color-border)', background: extrudeHeight === h ? 'var(--color-accent-subtle)' : 'transparent', color: extrudeHeight === h ? 'var(--color-accent)' : 'var(--color-text-muted)', cursor: 'pointer' }}>{h}m</button>
+              <button key={h} onClick={() => { setExtrudeHeight(h); applyExtrude(h) }}
+                style={{ flex: 1, height: 24, fontSize: 10, fontWeight: 600, borderRadius: 4, border: '1px solid var(--color-border)', background: extrudeHeight === h ? 'var(--color-accent-subtle)' : 'transparent', color: extrudeHeight === h ? 'var(--color-accent)' : 'var(--color-text-muted)', cursor: 'pointer' }}>
+                {h}m</button>
             ))}
           </div>
         </div>
-      )}
-
-      {/* Marquee box */}
-      {marqueeBox && (
-        <div style={{ position: 'absolute', left: marqueeBox.x, top: marqueeBox.y, width: marqueeBox.w, height: marqueeBox.h, border: '1.5px dashed #2563EB', background: 'rgba(37,99,235,0.08)', pointerEvents: 'none', zIndex: 20 }} />
       )}
     </div>
   )
 }
 
-// ── MapStyleBtn ──────────────────────────────────────────────────────────
+// ── MapStyleBtn ──────────────────────────────────────────────────────────────
 
 function MapStyleBtn({ styleKey, active, onClick }: { styleKey: string; active: boolean; onClick: () => void }) {
   const icons: Record<string, React.ReactNode> = {
-    satellite: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><rect x="4" y="4" width="7" height="7" rx="1" opacity="0.7"/><rect x="13" y="4" width="7" height="7" rx="1" opacity="0.4"/><rect x="4" y="13" width="7" height="7" rx="1" opacity="0.4"/><rect x="13" y="13" width="7" height="7" rx="1" opacity="0.7"/><line x1="4" y1="10" x2="20" y2="10"/><line x1="10" y1="4" x2="10" y2="20"/></svg>,
-    streets:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4" opacity="0.4"/><line x1="18.4" y1="5.6" x2="5.6" y2="18.4" opacity="0.4"/></svg>,
-    light:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.93" y1="4.93" x2="7.05" y2="7.05"/><line x1="16.95" y1="16.95" x2="19.07" y2="19.07"/><line x1="19.07" y1="4.93" x2="16.95" y2="7.05"/><line x1="7.05" y1="16.95" x2="4.93" y2="19.07"/></svg>,
+    satellite: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><rect x="4" y="4" width="7" height="7" rx="1" opacity="0.7" /><rect x="13" y="4" width="7" height="7" rx="1" opacity="0.4" /><rect x="4" y="13" width="7" height="7" rx="1" opacity="0.4" /><rect x="13" y="13" width="7" height="7" rx="1" opacity="0.7" /><line x1="4" y1="10" x2="20" y2="10" /><line x1="10" y1="4" x2="10" y2="20" /></svg>,
+    streets: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="5.6" y1="5.6" x2="18.4" y2="18.4" opacity="0.4" /><line x1="18.4" y1="5.6" x2="5.6" y2="18.4" opacity="0.4" /></svg>,
+    light: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="2" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="22" y2="12" /></svg>,
   }
-  const labels: Record<string, string> = { satellite: 'Satellite', streets: 'Streets', light: 'Light' }
   return (
-    <button onClick={onClick} title={labels[styleKey]}
+    <button onClick={onClick} title={styleKey}
       style={{ width: 36, height: 32, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: active ? 'var(--color-accent-subtle)' : 'transparent', color: active ? 'var(--color-accent)' : 'var(--color-text-muted)', transition: 'all 100ms' }}>
       {icons[styleKey]}
     </button>
   )
 }
 
-// ── MapGeocoder ──────────────────────────────────────────────────────────
+// ── MapGeocoder ───────────────────────────────────────────────────────────────
 
 function MapGeocoder({ token, mapRef }: { token: string; mapRef: React.MutableRefObject<mapboxgl.Map | null> }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<{ id: string; place_name: string; center: [number, number] }>>([])
   const [open, setOpen] = useState(false)
+
   useEffect(() => {
     if (query.length < 2) { setResults([]); return }
-    const t = window.setTimeout(async () => {
+    const t = setTimeout(async () => {
       try {
         const r = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&limit=5&types=place,address,poi`)
         const d = await r.json()
-        setResults(d.features ?? []); setOpen(true)
+        setResults(d.features ?? [])
+        setOpen(true)
       } catch { setResults([]) }
     }, 350)
     return () => clearTimeout(t)
   }, [query, token])
-  function flyTo(center: [number, number]) { mapRef.current?.flyTo({ center, zoom: 15, duration: 1200 }); setQuery(''); setResults([]); setOpen(false) }
+
+  function flyTo(center: [number, number]) {
+    mapRef.current?.flyTo({ center, zoom: 15, duration: 1200 })
+    setQuery(''); setResults([]); setOpen(false)
+  }
+
   return (
     <div style={{ width: 260 }}>
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
-        <svg style={{ position: 'absolute', left: 9, pointerEvents: 'none' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setOpen(false) }} onFocus={() => results.length > 0 && setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder="Search location…"
+        <svg style={{ position: 'absolute', left: 9, pointerEvents: 'none' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        <input value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setOpen(false) }}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Search location…"
           style={{ width: '100%', height: 34, padding: '0 28px 0 30px', fontSize: 12, border: 'none', background: 'transparent', color: 'var(--color-text)', outline: 'none', borderRadius: 8 }} />
-        {query && <button onClick={() => { setQuery(''); setResults([]); setOpen(false) }} style={{ position: 'absolute', right: 6, width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14 }}>×</button>}
+        {query && (
+          <button onClick={() => { setQuery(''); setResults([]); setOpen(false) }}
+            style={{ position: 'absolute', right: 6, width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14 }}>×</button>
+        )}
       </div>
       {open && results.length > 0 && (
         <div style={{ marginTop: 4, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
           {results.map(r => (
-            <div key={r.id} onMouseDown={() => flyTo(r.center)} style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)', lineHeight: 1.3 }}
+            <div key={r.id} onMouseDown={() => flyTo(r.center)}
+              style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--color-text)', borderBottom: '1px solid var(--color-border)', lineHeight: 1.3 }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-bg-elevated)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
               {r.place_name}
@@ -666,16 +1033,21 @@ function MapGeocoder({ token, mapRef }: { token: string; mapRef: React.MutableRe
   )
 }
 
-// ── CanvasSearchBar ──────────────────────────────────────────────────────
+// ── CanvasSearchBar ───────────────────────────────────────────────────────────
 
-function CanvasSearchBar({ query, onQuery, onClose, features, onSelect }: { query: string; onQuery: (q: string) => void; onClose: () => void; features: UMPFeature[]; onSelect: (id: string) => void }) {
+function CanvasSearchBar({ query, onQuery, onClose, features, onSelect }: {
+  query: string; onQuery: (q: string) => void; onClose: () => void;
+  features: UMPFeature[]; onSelect: (id: string) => void
+}) {
   const q = query.trim().toLowerCase()
   const results = q ? features.filter(f => f.properties.label.toLowerCase().includes(q)).slice(0, 8) : []
   return (
     <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'var(--color-bg-panel)', borderRadius: 10, border: '1px solid var(--color-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden', minWidth: 320 }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8, borderBottom: results.length ? '1px solid var(--color-border)' : 'none' }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input autoFocus value={query} onChange={e => onQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') onClose() }} placeholder="Search features…"
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        <input autoFocus value={query} onChange={e => onQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+          placeholder="Search features…"
           style={{ flex: 1, height: 40, border: 'none', background: 'transparent', fontSize: 13, color: 'var(--color-text)', outline: 'none' }} />
         <button onClick={onClose} style={{ width: 20, height: 20, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 14 }}>✕</button>
       </div>
@@ -689,7 +1061,9 @@ function CanvasSearchBar({ query, onQuery, onClose, features, onSelect }: { quer
           <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{f.properties.elementType}</span>
         </div>
       ))}
-      {q && results.length === 0 && <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--color-text-muted)' }}>No features found</div>}
+      {q && results.length === 0 && (
+        <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--color-text-muted)' }}>No features found</div>
+      )}
     </div>
   )
 }
