@@ -166,6 +166,50 @@ function updateCoordInGeom(geom: GeoJSON.Geometry, path: number[], coord: [numbe
   return g
 }
 
+function scaleGeometry(
+  map: mapboxgl.Map,
+  geom: GeoJSON.Geometry,
+  origin: [number, number],
+  start: [number, number],
+  current: [number, number],
+): GeoJSON.Geometry {
+  const dx0 = start[0] - origin[0], dy0 = start[1] - origin[1]
+  const dx1 = current[0] - origin[0], dy1 = current[1] - origin[1]
+  const sx = Math.abs(dx0) > 0.5 ? dx1 / dx0 : 1
+  const sy = Math.abs(dy0) > 0.5 ? dy1 / dy0 : 1
+  function sc(coord: [number, number]): [number, number] {
+    const [px, py] = lngLatToScreen(map, coord)
+    return screenToLngLat(map, origin[0] + (px - origin[0]) * sx, origin[1] + (py - origin[1]) * sy)
+  }
+  const g = JSON.parse(JSON.stringify(geom)) as GeoJSON.Geometry
+  if (g.type === 'Point') g.coordinates = sc(g.coordinates as [number, number])
+  else if (g.type === 'LineString') g.coordinates = (g.coordinates as [number, number][]).map(sc)
+  else if (g.type === 'Polygon') g.coordinates = (g.coordinates as [number, number][][]).map(r => r.map(sc))
+  return g
+}
+
+function scaleBezierNodes(
+  map: mapboxgl.Map,
+  nodes: BezierNode[],
+  origin: [number, number],
+  start: [number, number],
+  current: [number, number],
+): BezierNode[] {
+  const dx0 = start[0] - origin[0], dy0 = start[1] - origin[1]
+  const dx1 = current[0] - origin[0], dy1 = current[1] - origin[1]
+  const sx = Math.abs(dx0) > 0.5 ? dx1 / dx0 : 1
+  const sy = Math.abs(dy0) > 0.5 ? dy1 / dy0 : 1
+  function sc(coord: [number, number]): [number, number] {
+    const [px, py] = lngLatToScreen(map, coord)
+    return screenToLngLat(map, origin[0] + (px - origin[0]) * sx, origin[1] + (py - origin[1]) * sy)
+  }
+  return nodes.map(n => ({
+    anchor: sc(n.anchor),
+    handleIn: n.handleIn ? sc(n.handleIn) : null,
+    handleOut: n.handleOut ? sc(n.handleOut) : null,
+  }))
+}
+
 function rotateGeometry(
   map: mapboxgl.Map,
   geom: GeoJSON.Geometry,
@@ -292,6 +336,21 @@ export function Canvas() {
     centerLngLat: [number, number]
   } | null>(null)
   const [hoveredRotHandle, setHoveredRotHandle] = useState(false)
+  const [hoveredScaleHandle, setHoveredScaleHandle] = useState(false)
+
+  // Scale dragging (Illustrator-style corner handles)
+  const [draggingScale, setDraggingScale] = useState<{
+    featureId: string
+    originScreen: [number, number]   // fixed (opposite) corner
+    startScreen: [number, number]    // where drag started
+    originalGeom: GeoJSON.Geometry
+    originalBezierNodes?: BezierNode[]
+  } | null>(null)
+
+  // Node editing mode: double-click feature to enter, Escape/click-empty to exit
+  const [nodeEditingId, setNodeEditingId] = useState<string | null>(null)
+  const nodeEditingIdRef = useRef<string | null>(null)
+  useEffect(() => { nodeEditingIdRef.current = nodeEditingId }, [nodeEditingId])
 
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const {
@@ -456,9 +515,7 @@ export function Canvas() {
 
       if (!e.metaKey && !e.ctrlKey) {
         switch (e.key.toLowerCase()) {
-          case 'h': setActiveTool('pan'); break
           case 'v': setActiveTool('select'); break
-          case 'a': setActiveTool('direct'); break
           case 'p': setActiveTool('pen'); break
           case 'l': setActiveTool('line'); break
           case 'r': setActiveTool('rect'); break
@@ -475,6 +532,7 @@ export function Canvas() {
             setMeasurePts([])
             setActiveTool('select')
             setSelectedIds([])
+            setNodeEditingId(null)
             break
           case 'delete':
           case 'backspace':
@@ -521,9 +579,6 @@ export function Canvas() {
 
     mouseDownOnFeatureRef.current = false
 
-    // Pan tool handled entirely by Mapbox (interaction div is pointer-events:none)
-    if (tool === 'pan') return
-
     // ── Pen tool: record anchor for potential bezier drag ──
     if (tool === 'pen') {
       const snap = snapTargetRef.current
@@ -535,39 +590,15 @@ export function Canvas() {
     }
 
     if (tool === 'select' || tool === 'direct') {
-      // Check rotation handle first (only in select mode, not direct)
       const selId = selectedIdsRef.current[0]
-      if (selId && tool === 'select') {
-        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
-        if (selFeat && selFeat.geometry.type !== 'Point') {
-          const verts = getVertices(selFeat.geometry)
-          const sVerts = verts.map(v => lngLatToScreen(map, v.coord))
-          const bb = screenBbox(sVerts)
-          if (bb.w > 2 || bb.h > 2) {
-            const handleX = bb.x + bb.w / 2
-            const handleY = bb.y - 6 - 28
-            if (Math.hypot(handleX - sx, handleY - sy) < 10) {
-              const centerLngLat = screenToLngLat(map, bb.x + bb.w / 2, bb.y + bb.h / 2)
-              setDraggingRotation({
-                featureId: selId,
-                startAngle: Math.atan2(sy - (bb.y + bb.h / 2), sx - (bb.x + bb.w / 2)),
-                centerScreen: [bb.x + bb.w / 2, bb.y + bb.h / 2],
-                centerLngLat,
-              })
-              mouseDownOnFeatureRef.current = true
-              e.stopPropagation()
-              return
-            }
-          }
-        }
-      }
-      // Check vertex / bezier handles (direct tool = node editing, select tool = whole object)
-      if (selId && tool === 'direct') {
+      const inNodeEdit = nodeEditingIdRef.current === selId && selId != null
+
+      // ── Node editing mode (double-clicked into) ──
+      if (inNodeEdit && selId) {
         const selFeat = featuresRef.current.find(f => f.properties.id === selId)
         if (selFeat) {
           const bezNodes = selFeat.properties.bezierNodes as BezierNode[] | undefined
           if (bezNodes) {
-            // Check bezier handles of the active node first
             const abn = activeBezierNode?.featureId === selId ? activeBezierNode : null
             if (abn) {
               const node = bezNodes[abn.idx]
@@ -585,7 +616,6 @@ export function Canvas() {
                 }
               }
             }
-            // Check anchors
             for (let i = 0; i < bezNodes.length; i++) {
               const [ax, ay] = lngLatToScreen(map, bezNodes[i].anchor)
               if (Math.hypot(ax - sx, ay - sy) < 8) {
@@ -602,7 +632,60 @@ export function Canvas() {
               if (Math.hypot(vx - sx, vy - sy) < 9) {
                 setDraggingNode({ featureId: selId, path: v.path })
                 mouseDownOnFeatureRef.current = true
-                e.stopPropagation()
+                return
+              }
+            }
+          }
+        }
+      }
+
+      // ── Regular select mode: corner handles (scale near, rotate far) ──
+      if (!inNodeEdit && selId) {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat && selFeat.geometry.type !== 'Point') {
+          const verts = getVertices(selFeat.geometry)
+          const sVerts = verts.map(v => lngLatToScreen(map, v.coord))
+          const bb = screenBbox(sVerts)
+          if (bb.w > 2 || bb.h > 2) {
+            const corners: [number, number][] = [
+              [bb.x - 6, bb.y - 6],
+              [bb.x + bb.w + 6, bb.y - 6],
+              [bb.x - 6, bb.y + bb.h + 6],
+              [bb.x + bb.w + 6, bb.y + bb.h + 6],
+            ]
+            const opposites: [number, number][] = [
+              [bb.x + bb.w + 6, bb.y + bb.h + 6], // TL → opposite BR
+              [bb.x - 6, bb.y + bb.h + 6],          // TR → opposite BL
+              [bb.x + bb.w + 6, bb.y - 6],          // BL → opposite TR
+              [bb.x - 6, bb.y - 6],                  // BR → opposite TL
+            ]
+            const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2
+            for (let i = 0; i < 4; i++) {
+              const [cornX, cornY] = corners[i]
+              const d = Math.hypot(cornX - sx, cornY - sy)
+              if (d < 16) {
+                if (d < 7) {
+                  // On corner handle → scale
+                  setDraggingScale({
+                    featureId: selId,
+                    originScreen: opposites[i],
+                    startScreen: [sx, sy],
+                    originalGeom: JSON.parse(JSON.stringify(selFeat.geometry)),
+                    originalBezierNodes: selFeat.properties.bezierNodes
+                      ? JSON.parse(JSON.stringify(selFeat.properties.bezierNodes))
+                      : undefined,
+                  })
+                } else {
+                  // Near corner but outside handle → rotate
+                  const centerLngLat = screenToLngLat(map, cx, cy)
+                  setDraggingRotation({
+                    featureId: selId,
+                    startAngle: Math.atan2(sy - cy, sx - cx),
+                    centerScreen: [cx, cy],
+                    centerLngLat,
+                  })
+                }
+                mouseDownOnFeatureRef.current = true
                 return
               }
             }
@@ -635,13 +718,25 @@ export function Canvas() {
     const lngLat = screenToLngLat(map, sx, sy)
     setCursorPos([sx, sy])
 
-    // Select-tool manual pan
-    if (panStartRef.current && activeToolRef.current === 'select') {
+    // Manual pan when dragging empty space (select tool)
+    if (panStartRef.current && (activeToolRef.current === 'select' || activeToolRef.current === 'direct')) {
       const [lx, ly] = panStartRef.current
-      const dx = sx - lx
-      const dy = sy - ly
-      map.panBy([-dx, -dy], { animate: false, duration: 0 })
+      map.panBy([-(sx - lx), -(sy - ly)], { animate: false, duration: 0 })
       panStartRef.current = [sx, sy]
+      return
+    }
+
+    // Scale dragging (corner handle)
+    if (draggingScale) {
+      const feat = featuresRef.current.find(f => f.properties.id === draggingScale.featureId)
+      if (feat) {
+        const newGeom = scaleGeometry(map, draggingScale.originalGeom, draggingScale.originScreen, draggingScale.startScreen, [sx, sy])
+        updateGeometry(feat.properties.id, newGeom)
+        if (draggingScale.originalBezierNodes) {
+          const scaledNodes = scaleBezierNodes(map, draggingScale.originalBezierNodes, draggingScale.originScreen, draggingScale.startScreen, [sx, sy])
+          updateFeature(feat.properties.id, { bezierNodes: scaledNodes as UMPFeatureProperties['bezierNodes'] })
+        }
+      }
       return
     }
 
@@ -718,19 +813,25 @@ export function Canvas() {
 
     // Hover detection for cursor changes
     if (activeToolRef.current === 'select' || activeToolRef.current === 'direct') {
-      // Check rotation handle hover
+      // Check corner hover (scale/rotate zone) — only in non-node-editing mode
       const selId = selectedIdsRef.current[0]
-      if (selId && activeToolRef.current === 'select') {
+      const inNodeEdit = nodeEditingIdRef.current === selId && selId != null
+      if (selId && !inNodeEdit) {
         const selFeat = featuresRef.current.find(f => f.properties.id === selId)
         if (selFeat && selFeat.geometry.type !== 'Point') {
           const verts = getVertices(selFeat.geometry)
           const sVerts = verts.map(v => lngLatToScreen(map, v.coord))
           const bb = screenBbox(sVerts)
           if (bb.w > 2 || bb.h > 2) {
-            const handleX = bb.x + bb.w / 2
-            const handleY = bb.y - 6 - 28
-            if (Math.hypot(handleX - sx, handleY - sy) < 10) {
-              setHoveredRotHandle(true)
+            const corners: [number, number][] = [
+              [bb.x - 6, bb.y - 6], [bb.x + bb.w + 6, bb.y - 6],
+              [bb.x - 6, bb.y + bb.h + 6], [bb.x + bb.w + 6, bb.y + bb.h + 6],
+            ]
+            const onHandle = corners.some(([cx, cy]) => Math.hypot(cx - sx, cy - sy) < 7)
+            const nearCorner = corners.some(([cx, cy]) => Math.hypot(cx - sx, cy - sy) < 16)
+            if (nearCorner) {
+              setHoveredScaleHandle(onHandle)
+              setHoveredRotHandle(!onHandle)
               setHoveredVertIdx(null)
               setHoveredFeatureId(null)
               return
@@ -739,6 +840,7 @@ export function Canvas() {
         }
       }
       setHoveredRotHandle(false)
+      setHoveredScaleHandle(false)
 
       // Check vertex hover
       if (selId) {
@@ -775,6 +877,11 @@ export function Canvas() {
       return
     }
 
+    if (draggingScale) {
+      setDraggingScale(null)
+      return
+    }
+
     if (draggingRotation) {
       setDraggingRotation(null)
       return
@@ -797,8 +904,27 @@ export function Canvas() {
         newNode = { anchor: pda.anchor, handleIn, handleOut }
       }
 
-      // Check close-to-first-node for polygon close
       const prev = penNodesRef.current
+
+      // Convert smooth → corner: click (no drag) on an existing node with handles
+      if (isCorner) {
+        for (let i = 0; i < prev.length; i++) {
+          const [nx, ny] = lngLatToScreen(map, prev[i].anchor)
+          if (Math.hypot(nx - pda.screen[0], ny - pda.screen[1]) < 12) {
+            if (prev[i].handleIn || prev[i].handleOut) {
+              setPenNodes(ns => ns.map((n, idx) =>
+                idx === i ? { anchor: n.anchor, handleIn: null, handleOut: null } : n
+              ))
+              setPenDragAnchor(null)
+              penDragAnchorRef.current = null
+              penHandledRef.current = true
+              return
+            }
+          }
+        }
+      }
+
+      // Check close-to-first-node for polygon close
       if (prev.length >= 3) {
         const [fx, fy] = lngLatToScreen(map, prev[0].anchor)
         if (Math.hypot(fx - pda.screen[0], fy - pda.screen[1]) < 14) {
@@ -888,12 +1014,16 @@ export function Canvas() {
             ? ids.filter(id => id !== hit.properties.id)
             : [...ids, hit.properties.id])
         } else {
-          if (hit.properties.id !== selectedIdsRef.current[0]) setActiveBezierNode(null)
+          if (hit.properties.id !== selectedIdsRef.current[0]) {
+            setActiveBezierNode(null)
+            setNodeEditingId(null)
+          }
           setSelectedIds([hit.properties.id])
         }
         return
       }
       setActiveBezierNode(null)
+      setNodeEditingId(null)
 
       // Click-to-place for 'place' drawMode elements
       const elType = activeElementTypeRef.current
@@ -950,7 +1080,8 @@ export function Canvas() {
     }
   }, [getCanvasXY, marquee, draggingNode, addFeature, setSelectedIds, layers])
 
-  const handleDoubleClick = useCallback(() => {
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    const map = mapRef.current
     const tool = activeToolRef.current
     const nodes = drawNodesRef.current
     const pnodes = penNodesRef.current
@@ -971,8 +1102,28 @@ export function Canvas() {
         ))
         setMeasurePts([])
       }
+      return
     }
-  }, [])
+    // Double-click on selected feature → enter node editing
+    if ((tool === 'select' || tool === 'direct') && map) {
+      const [sx, sy] = getCanvasXY(e)
+      const selId = selectedIdsRef.current[0]
+      if (selId) {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat) {
+          const hit = hitTestFeatures(map, [selFeat], sx, sy)
+          if (hit) { setNodeEditingId(selId); return }
+        }
+      }
+      // Double-click on any feature selects + enters node editing
+      const visible = featuresRef.current.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
+      const hit = hitTestFeatures(map, visible, sx, sy)
+      if (hit) {
+        setSelectedIds([hit.properties.id])
+        setNodeEditingId(hit.properties.id)
+      }
+    }
+  }, [getCanvasXY, layers, setSelectedIds])
 
   // ── Finish drawing ────────────────────────────────────────────────────────
   function makeElFeature(geom: GeoJSON.Geometry, fallbackType: string, fallbackCat: string) {
@@ -1048,7 +1199,9 @@ export function Canvas() {
     text: 'text', measure: 'crosshair', extrude: 'default',
   }
   let cursor = CURSORS[activeTool] ?? 'default'
-  if (draggingRotation) cursor = 'grabbing'
+  if (draggingScale) cursor = 'nwse-resize'
+  else if (draggingRotation) cursor = 'grabbing'
+  else if (hoveredScaleHandle) cursor = 'nwse-resize'
   else if (hoveredRotHandle) cursor = 'grab'
   else if (draggingNode) cursor = 'crosshair'
   else if (hoveredVertIdx !== null) cursor = 'grab'
@@ -1198,6 +1351,30 @@ export function Canvas() {
         : geomToScreenPath(map, f.geometry)
       const isLine = f.geometry.type === 'LineString'
       const sw = style.strokeWidth ?? 2
+
+      // ── Measurement features: amber dashed line + segment labels ──
+      if (f.properties.elementType === 'measurement' && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <path d={path} fill="none" stroke="#F59E0B" strokeWidth={2} strokeDasharray="6 4" />
+            {coords.slice(1).map((pt, i) => {
+              const from = coords[i]
+              const d = haversineFt(from, pt)
+              const mid: [number, number] = [(from[0] + pt[0]) / 2, (from[1] + pt[1]) / 2]
+              const [mx, my] = lngLatToScreen(map, mid)
+              return (
+                <text key={i} x={mx} y={my} textAnchor="middle" dominantBaseline="middle"
+                  fontSize={11} fontWeight="600" fontFamily="Inter"
+                  fill="#F59E0B" stroke="rgba(0,0,0,0.75)" strokeWidth={3} paintOrder="stroke"
+                  style={{ userSelect: 'none' }}>
+                  {fmtDist(d)}
+                </text>
+              )
+            })}
+          </g>
+        )
+      }
 
       // ── Corridor rendering for street-section elements ──
       if (f.properties.category === 'streets' && isLine) {
@@ -1409,11 +1586,8 @@ export function Canvas() {
 
       const bb = screenBbox(screenVerts)
       const hasBbox = bb.w > 2 || bb.h > 2
-      const handleX = bb.x + bb.w / 2
-      const handleY = bb.y - 6 - 28
-
       const bezNodes = f.properties.bezierNodes as BezierNode[] | undefined
-      const isDirectTool = activeTool === 'direct'
+      const inNodeEdit = nodeEditingId === id
 
       return (
         <g key={`sel-${id}`} style={{ pointerEvents: 'none' }}>
@@ -1423,31 +1597,21 @@ export function Canvas() {
               fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
           )}
 
-          {/* Select tool: rotation handle + scale corner handles */}
-          {!isDirectTool && hasBbox && f.geometry.type !== 'Point' && (
+          {/* Regular select mode: 4 corner handles (scale within 7px, rotate 7–16px) */}
+          {!inNodeEdit && hasBbox && f.geometry.type !== 'Point' && (
             <>
-              <line x1={handleX} y1={bb.y - 6} x2={handleX} y2={handleY + 7}
-                stroke="#2563EB" strokeWidth={1} opacity={0.45} />
-              <circle cx={handleX} cy={handleY} r={7}
-                fill={hoveredRotHandle ? '#EFF6FF' : 'white'}
-                stroke="#2563EB" strokeWidth={1.5} />
-              <path d={`M ${handleX - 3.5} ${handleY + 1} A 4 4 0 1 1 ${handleX + 1} ${handleY - 3.5}`}
-                fill="none" stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
-              <path d={`M ${handleX + 1} ${handleY - 3.5} L ${handleX + 1} ${handleY - 6} M ${handleX + 1} ${handleY - 3.5} L ${handleX + 3.5} ${handleY - 3.5}`}
-                stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
-              {/* Scale handles at corners */}
-              {[
+              {([
                 [bb.x - 6, bb.y - 6], [bb.x + bb.w + 6, bb.y - 6],
                 [bb.x - 6, bb.y + bb.h + 6], [bb.x + bb.w + 6, bb.y + bb.h + 6],
-              ].map(([sx, sy], i) => (
-                <rect key={i} x={sx - 3.5} y={sy - 3.5} width={7} height={7}
+              ] as [number, number][]).map(([cx, cy], i) => (
+                <rect key={i} x={cx - 4} y={cy - 4} width={8} height={8}
                   fill="white" stroke="#2563EB" strokeWidth={1.5} />
               ))}
             </>
           )}
 
-          {/* Direct tool: vertex anchors + bezier handles for active node */}
-          {isDirectTool && (
+          {/* Node editing mode: anchor handles + bezier handles for active node */}
+          {inNodeEdit && (
             <>
               {bezNodes ? (
                 bezNodes.map((node, i) => {
@@ -1455,7 +1619,6 @@ export function Canvas() {
                   const isActive = activeBezierNode?.featureId === id && activeBezierNode.idx === i
                   return (
                     <g key={i}>
-                      {/* Bezier handles for active node */}
                       {isActive && node.handleIn && (() => {
                         const [hx, hy] = lngLatToScreen(map, node.handleIn)
                         return <><line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={4} fill="#2563EB" opacity={0.8} /></>
@@ -1464,7 +1627,7 @@ export function Canvas() {
                         const [hx, hy] = lngLatToScreen(map, node.handleOut)
                         return <><line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={4} fill="#2563EB" opacity={0.8} /></>
                       })()}
-                      {/* Anchor: square for corner, circle for smooth */}
+                      {/* Circle = smooth node, square = corner node */}
                       {(node.handleIn || node.handleOut) ? (
                         <circle cx={ax} cy={ay} r={4.5} fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
                       ) : (
@@ -1475,10 +1638,8 @@ export function Canvas() {
                 })
               ) : (
                 screenVerts.map(([vx, vy], i) => (
-                  <g key={i}>
-                    <rect x={vx - 4} y={vy - 4} width={8} height={8}
-                      fill={hoveredVertIdx === i ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
-                  </g>
+                  <rect key={i} x={vx - 4} y={vy - 4} width={8} height={8}
+                    fill={hoveredVertIdx === i ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
                 ))
               )}
             </>
@@ -1557,8 +1718,7 @@ export function Canvas() {
       <div
         style={{
           position: 'absolute', inset: 0, zIndex: 10,
-          cursor: activeTool === 'pan' ? 'grab' : cursor,
-          pointerEvents: activeTool === 'pan' ? 'none' : undefined,
+          cursor,
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

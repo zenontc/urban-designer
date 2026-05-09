@@ -6,28 +6,26 @@ import { useUIStore, type ToolId } from '../store/uiStore'
 const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }[]> = [
   // Navigation
   [
-    { id: 'pan',     label: 'Pan / Hand',     shortcut: 'H', icon: 'hand' },
-    { id: 'select',  label: 'Select',          shortcut: 'V', icon: 'select' },
-    { id: 'direct',  label: 'Marquee Select', shortcut: 'A', icon: 'marquee' },
+    { id: 'select',  label: 'Select',   shortcut: 'V', icon: 'select' },
   ],
   // Drawing
   [
-    { id: 'pen',     label: 'Pen / Path',    shortcut: 'P', icon: 'penBezier' },
-    { id: 'line',    label: 'Line',          shortcut: 'L', icon: 'line' },
-    { id: 'rect',    label: 'Rectangle',     shortcut: 'R', icon: 'rect' },
-    { id: 'ellipse', label: 'Ellipse',       shortcut: 'E', icon: 'ellipse' },
-    { id: 'polygon', label: 'Polygon',       shortcut: 'G', icon: 'polygon' },
+    { id: 'pen',     label: 'Pen / Path',  shortcut: 'P', icon: 'penBezier' },
+    { id: 'line',    label: 'Line',        shortcut: 'L', icon: 'line' },
+    { id: 'rect',    label: 'Rectangle',   shortcut: 'R', icon: 'rect' },
+    { id: 'ellipse', label: 'Ellipse',     shortcut: 'E', icon: 'ellipse' },
+    { id: 'polygon', label: 'Polygon',     shortcut: 'G', icon: 'polygon' },
   ],
   // Edit
   [
-    { id: 'text',    label: 'Text',          shortcut: 'T', icon: 'text' },
-    { id: 'extrude', label: 'Extrude',       shortcut: 'X', icon: 'extrude' },
-    { id: 'measure', label: 'Measure',       shortcut: 'M', icon: 'measure' },
+    { id: 'text',    label: 'Text',    shortcut: 'T', icon: 'text' },
+    { id: 'extrude', label: 'Extrude', shortcut: 'X', icon: 'extrude' },
+    { id: 'measure', label: 'Measure', shortcut: 'M', icon: 'measure' },
   ],
 ]
 
 const KEY_MAP: Record<string, ToolId> = {
-  h: 'pan', v: 'select', a: 'direct', p: 'pen', l: 'line', r: 'rect',
+  v: 'select', p: 'pen', l: 'line', r: 'rect',
   e: 'ellipse', g: 'polygon', t: 'text', x: 'extrude', m: 'measure',
 }
 
@@ -46,7 +44,7 @@ export function ToolStrip() {
   }, [setActiveTool])
 
   function ToolBtn({ tool }: { tool: typeof TOOLS[0][0] }) {
-    const active = activeTool === tool.id
+    const active = activeTool === tool.id || (tool.id === 'select' && activeTool === 'direct')
     return (
       <Tooltip label={tool.label} shortcut={tool.shortcut}>
         <button
