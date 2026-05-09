@@ -68,6 +68,33 @@ function updateCoordInGeom(geom: GeoJSON.Geometry, path: number[], coord: [numbe
   return g
 }
 
+function rotateGeometry(
+  map: mapboxgl.Map,
+  geom: GeoJSON.Geometry,
+  center: [number, number],
+  angle: number,
+): GeoJSON.Geometry {
+  const [cx, cy] = lngLatToScreen(map, center)
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  function rotCoord(coord: [number, number]): [number, number] {
+    const [sx, sy] = lngLatToScreen(map, coord)
+    const rx = cos * (sx - cx) - sin * (sy - cy) + cx
+    const ry = sin * (sx - cx) + cos * (sy - cy) + cy
+    return screenToLngLat(map, rx, ry)
+  }
+  const g = JSON.parse(JSON.stringify(geom)) as GeoJSON.Geometry
+  if (g.type === 'Point') {
+    g.coordinates = rotCoord(g.coordinates as [number, number])
+  } else if (g.type === 'LineString') {
+    g.coordinates = (g.coordinates as number[][]).map(c => rotCoord(c as [number, number]))
+  } else if (g.type === 'Polygon') {
+    g.coordinates = (g.coordinates as number[][][]).map(ring =>
+      ring.map(c => rotCoord(c as [number, number])))
+  }
+  return g
+}
+
 // Hit-test features at a screen position
 function hitTestFeatures(
   map: mapboxgl.Map,
@@ -135,6 +162,15 @@ export function Canvas() {
 
   // Extrude
   const [extrudeHeight, setExtrudeHeight] = useState(0)
+
+  // Rotation
+  const [draggingRotation, setDraggingRotation] = useState<{
+    featureId: string
+    startAngle: number
+    centerScreen: [number, number]
+    centerLngLat: [number, number]
+  } | null>(null)
+  const [hoveredRotHandle, setHoveredRotHandle] = useState(false)
 
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const {
@@ -333,8 +369,33 @@ export function Canvas() {
     mouseDownOnFeatureRef.current = false
 
     if (tool === 'select' || tool === 'direct') {
-      // Check vertex handles first
+      // Check rotation handle first (only in select mode, not direct)
       const selId = selectedIdsRef.current[0]
+      if (selId && tool === 'select') {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat && selFeat.geometry.type !== 'Point') {
+          const verts = getVertices(selFeat.geometry)
+          const sVerts = verts.map(v => lngLatToScreen(map, v.coord))
+          const bb = screenBbox(sVerts)
+          if (bb.w > 2 || bb.h > 2) {
+            const handleX = bb.x + bb.w / 2
+            const handleY = bb.y - 6 - 28
+            if (Math.hypot(handleX - sx, handleY - sy) < 10) {
+              const centerLngLat = screenToLngLat(map, bb.x + bb.w / 2, bb.y + bb.h / 2)
+              setDraggingRotation({
+                featureId: selId,
+                startAngle: Math.atan2(sy - (bb.y + bb.h / 2), sx - (bb.x + bb.w / 2)),
+                centerScreen: [bb.x + bb.w / 2, bb.y + bb.h / 2],
+                centerLngLat,
+              })
+              mouseDownOnFeatureRef.current = true
+              e.stopPropagation()
+              return
+            }
+          }
+        }
+      }
+      // Check vertex handles
       if (selId) {
         const selFeat = featuresRef.current.find(f => f.properties.id === selId)
         if (selFeat) {
@@ -372,6 +433,18 @@ export function Canvas() {
     const lngLat = screenToLngLat(map, sx, sy)
     setCursorPos([sx, sy])
 
+    // Rotation dragging
+    if (draggingRotation) {
+      const currentAngle = Math.atan2(sy - draggingRotation.centerScreen[1], sx - draggingRotation.centerScreen[0])
+      const delta = currentAngle - draggingRotation.startAngle
+      const feat = featuresRef.current.find(f => f.properties.id === draggingRotation.featureId)
+      if (feat) {
+        updateGeometry(draggingRotation.featureId, rotateGeometry(map, feat.geometry, draggingRotation.centerLngLat, delta))
+        setDraggingRotation(prev => prev ? { ...prev, startAngle: currentAngle } : null)
+      }
+      return
+    }
+
     // Node dragging
     if (draggingNode) {
       const feat = featuresRef.current.find(f => f.properties.id === draggingNode.featureId)
@@ -387,8 +460,29 @@ export function Canvas() {
 
     // Hover detection for cursor changes
     if (activeToolRef.current === 'select' || activeToolRef.current === 'direct') {
-      // Check vertex hover
+      // Check rotation handle hover
       const selId = selectedIdsRef.current[0]
+      if (selId && activeToolRef.current === 'select') {
+        const selFeat = featuresRef.current.find(f => f.properties.id === selId)
+        if (selFeat && selFeat.geometry.type !== 'Point') {
+          const verts = getVertices(selFeat.geometry)
+          const sVerts = verts.map(v => lngLatToScreen(map, v.coord))
+          const bb = screenBbox(sVerts)
+          if (bb.w > 2 || bb.h > 2) {
+            const handleX = bb.x + bb.w / 2
+            const handleY = bb.y - 6 - 28
+            if (Math.hypot(handleX - sx, handleY - sy) < 10) {
+              setHoveredRotHandle(true)
+              setHoveredVertIdx(null)
+              setHoveredFeatureId(null)
+              return
+            }
+          }
+        }
+      }
+      setHoveredRotHandle(false)
+
+      // Check vertex hover
       if (selId) {
         const selFeat = featuresRef.current.find(f => f.properties.id === selId)
         if (selFeat) {
@@ -408,12 +502,17 @@ export function Canvas() {
       const hit = hitTestFeatures(map, visible, sx, sy)
       setHoveredFeatureId(hit?.properties.id ?? null)
     }
-  }, [getCanvasXY, draggingNode, marquee, updateGeometry, layers])
+  }, [getCanvasXY, draggingRotation, draggingNode, marquee, updateGeometry, layers])
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
     if (!map) return
     const [sx, sy] = getCanvasXY(e)
+
+    if (draggingRotation) {
+      setDraggingRotation(null)
+      return
+    }
 
     if (draggingNode) {
       setDraggingNode(null)
@@ -441,7 +540,7 @@ export function Canvas() {
 
     // Unused — suppress lint warning
     void sx; void sy
-  }, [getCanvasXY, draggingNode, marquee, setSelectedIds])
+  }, [getCanvasXY, draggingRotation, draggingNode, marquee, setSelectedIds])
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
@@ -601,11 +700,119 @@ export function Canvas() {
     text: 'text', measure: 'crosshair', extrude: 'default',
   }
   let cursor = CURSORS[activeTool] ?? 'default'
-  if (draggingNode) cursor = 'crosshair'
+  if (draggingRotation) cursor = 'grabbing'
+  else if (hoveredRotHandle) cursor = 'grab'
+  else if (draggingNode) cursor = 'crosshair'
   else if (hoveredVertIdx !== null) cursor = 'grab'
   else if (hoveredFeatureId && (activeTool === 'select' || activeTool === 'direct')) cursor = 'pointer'
 
   // ── SVG rendering ─────────────────────────────────────────────────────────
+
+  function renderPointSymbol(
+    f: UMPFeature, px: number, py: number,
+    isSelected: boolean, isHovered: boolean,
+    selColor: string, strokeColor: string,
+  ) {
+    const fill = f.properties.style.fillColor ?? '#2563EB'
+    const sw = isSelected ? 2.5 : 1.5
+    const cat = f.properties.category
+    const elId = f.properties.elementType
+
+    // Trees
+    if (elId === 'tree' || elId === 'storm-tree-pit') {
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          <circle cx={px} cy={py} r={10} fill={fill} fillOpacity={0.75} stroke={strokeColor} strokeWidth={sw} />
+          <circle cx={px - 2} cy={py - 2} r={4} fill={fill} fillOpacity={0.5} />
+          {isSelected && <circle cx={px} cy={py} r={14} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Shrubs
+    if (elId === 'shrub') {
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          <circle cx={px} cy={py} r={6} fill={fill} fillOpacity={0.8} stroke={strokeColor} strokeWidth={sw} />
+          {isSelected && <circle cx={px} cy={py} r={10} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Actors (pedestrian, bicyclist, etc.)
+    if (cat === 'actors') {
+      const isVehicle = elId === 'car' || elId === 'delivery-vehicle' || elId === 'bus-vehicle'
+      if (isVehicle) {
+        const w = elId === 'bus-vehicle' ? 14 : 10
+        const h = elId === 'bus-vehicle' ? 22 : 16
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <rect x={px - w / 2} y={py - h / 2} width={w} height={h} rx={2}
+              fill={fill} stroke={strokeColor} strokeWidth={sw} />
+            {isSelected && <circle cx={px} cy={py} r={Math.max(w, h) / 2 + 5}
+              fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+      // Person silhouette
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }} transform={`translate(${px},${py})`}>
+          <circle cx={0} cy={-7} r={3.5} fill={fill} stroke={strokeColor} strokeWidth={sw * 0.7} />
+          <path d="M0,-3 L0,4 M-4,0 L4,0 M0,4 L-3,11 M0,4 L3,11"
+            stroke={fill} strokeWidth={2} strokeLinecap="round" fill="none" />
+          {isSelected && <circle cx={0} cy={2} r={13} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Furniture: bollard
+    if (elId === 'bollard') {
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          <rect x={px - 3} y={py - 7} width={6} height={14} rx={3}
+            fill={fill} stroke={strokeColor} strokeWidth={sw} />
+          {isSelected && <circle cx={px} cy={py} r={11} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Furniture: street light / ped light
+    if (elId === 'street-light' || elId === 'ped-light') {
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          <line x1={px} y1={py + 8} x2={px} y2={py - 8} stroke={fill} strokeWidth={2} strokeLinecap="round" />
+          <line x1={px} y1={py - 8} x2={px + 6} y2={py - 8} stroke={fill} strokeWidth={2} strokeLinecap="round" />
+          <circle cx={px + 6} cy={py - 8} r={3} fill="#FCD34D" stroke={fill} strokeWidth={1} />
+          {isSelected && <circle cx={px} cy={py} r={13} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Transit stations
+    if (cat === 'transit' && elId !== 'bus-stop') {
+      return (
+        <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          <rect x={px - 9} y={py - 9} width={18} height={18} rx={3}
+            fill={fill} stroke={strokeColor} strokeWidth={sw} />
+          <text x={px} y={py + 1} textAnchor="middle" dominantBaseline="middle"
+            fill="white" fontSize={9} fontWeight="bold" style={{ userSelect: 'none' }}>
+            {elId === 'rail-station' ? 'R' : elId === 'brt-station' ? 'B' : elId === 'ferry-terminal' ? 'F' : 'T'}
+          </text>
+          {isSelected && <rect x={px - 13} y={py - 13} width={26} height={26} rx={5}
+            fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Default: colored circle
+    return (
+      <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+        <circle cx={px} cy={py} r={8} fill={fill} stroke={strokeColor} strokeWidth={sw} />
+        {isSelected && <circle cx={px} cy={py} r={12} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+      </g>
+    )
+  }
+
   const map = mapRef.current
   const visibleFeatures = map
     ? features.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
@@ -634,13 +841,7 @@ export function Canvas() {
             </text>
           )
         }
-        // Point symbol
-        return (
-          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-            <circle cx={px} cy={py} r={8} fill={style.fillColor ?? '#2563EB'} stroke={strokeColor} strokeWidth={isSelected ? 2.5 : 1.5} />
-            {isSelected && <circle cx={px} cy={py} r={12} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
-          </g>
-        )
+        return renderPointSymbol(f, px, py, isSelected, isHovered, selColor, strokeColor)
       }
 
       const path = geomToScreenPath(map, f.geometry)
@@ -661,6 +862,30 @@ export function Canvas() {
         </g>
       )
     })
+  }
+
+  function renderPlacePreview() {
+    if (!map || !cursorPos) return null
+    const elType = activeElementType
+    if (!elType) return null
+    const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
+    if (!el || el.drawMode !== 'place') return null
+    const [px, py] = cursorPos
+    const fill = el.defaultStyle?.fillColor ?? '#2563EB'
+    const cat = el.category
+    const id = el.id
+
+    // Reuse same symbol logic with opacity wrapper
+    const dummy = {
+      properties: { id: '__preview__', elementType: id, category: cat, style: el.defaultStyle ?? {}, label: el.label },
+      geometry: { type: 'Point' as const, coordinates: [0, 0] },
+    } as UMPFeature
+
+    return (
+      <g style={{ pointerEvents: 'none', opacity: 0.6 }}>
+        {renderPointSymbol(dummy, px, py, false, false, '#F59E0B', fill)}
+      </g>
+    )
   }
 
   function renderActiveDraw() {
@@ -732,17 +957,33 @@ export function Canvas() {
       if (verts.length === 0) return null
       const screenVerts = verts.map(v => lngLatToScreen(map, v.coord))
 
+      const bb = screenBbox(screenVerts)
+      const hasBbox = bb.w > 2 || bb.h > 2
+      const handleX = bb.x + bb.w / 2
+      const handleY = bb.y - 6 - 28
+
       return (
         <g key={`sel-${id}`} style={{ pointerEvents: 'none' }}>
           {/* Bounding box */}
-          {(() => {
-            const bb = screenBbox(screenVerts)
-            if (bb.w < 2 && bb.h < 2) return null
-            return (
-              <rect x={bb.x - 6} y={bb.y - 6} width={bb.w + 12} height={bb.h + 12}
-                fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
-            )
-          })()}
+          {hasBbox && (
+            <rect x={bb.x - 6} y={bb.y - 6} width={bb.w + 12} height={bb.h + 12}
+              fill="none" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
+          )}
+          {/* Rotation handle — only for non-point features */}
+          {hasBbox && f.geometry.type !== 'Point' && (
+            <>
+              <line x1={handleX} y1={bb.y - 6} x2={handleX} y2={handleY + 7}
+                stroke="#2563EB" strokeWidth={1} opacity={0.45} />
+              <circle cx={handleX} cy={handleY} r={7}
+                fill={hoveredRotHandle ? '#EFF6FF' : 'white'}
+                stroke="#2563EB" strokeWidth={1.5} />
+              {/* Curved arrow icon */}
+              <path d={`M ${handleX - 3.5} ${handleY + 1} A 4 4 0 1 1 ${handleX + 1} ${handleY - 3.5}`}
+                fill="none" stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
+              <path d={`M ${handleX + 1} ${handleY - 3.5} L ${handleX + 1} ${handleY - 6} M ${handleX + 1} ${handleY - 3.5} L ${handleX + 3.5} ${handleY - 3.5}`}
+                stroke="#2563EB" strokeWidth={1.5} strokeLinecap="round" />
+            </>
+          )}
           {/* Vertex handles */}
           {screenVerts.map(([vx, vy], i) => (
             <g key={i}>
@@ -805,6 +1046,7 @@ export function Canvas() {
         >
           <g id="elements-layer">{renderFeatures()}</g>
           <g id="active-draw-layer">{renderActiveDraw()}</g>
+          <g id="place-preview-layer">{renderPlacePreview()}</g>
           <g id="selection-layer">{renderSelection()}</g>
           <g id="measure-layer">{renderMeasure()}</g>
 
