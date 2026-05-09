@@ -1,6 +1,7 @@
 import React from 'react'
 import { ZoneHeader } from '../components/ZoneHeader'
 import { useUIStore } from '../../store/uiStore'
+import { useCanvasStore } from '../../store/canvasStore'
 import type { ElementStyle } from '../../elements/types'
 
 const PRESETS: Array<{ label: string; style: Partial<ElementStyle> }> = [
@@ -24,15 +25,27 @@ const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48]
 
 export function StyleZone() {
   const { zoneCollapsed, toggleZone, activeStyle, setActiveStyle } = useUIStore()
+  const { features, selectedIds, updateFeature } = useCanvasStore()
   const collapsed = zoneCollapsed['style']
-  const s = activeStyle
+
+  // If a feature is selected, edit its style; otherwise edit the default active style
+  const selectedFeature = selectedIds.length === 1
+    ? features.find(f => f.properties.id === selectedIds[0])
+    : null
+  const s: ElementStyle = selectedFeature ? selectedFeature.properties.style : activeStyle
 
   function set(patch: Partial<ElementStyle>) {
-    setActiveStyle({ ...s, ...patch })
+    if (selectedFeature) {
+      updateFeature(selectedFeature.properties.id, {
+        style: { ...selectedFeature.properties.style, ...patch }
+      })
+    } else {
+      setActiveStyle({ ...s, ...patch })
+    }
   }
 
   return (
-    <ZoneHeader label="Style" collapsed={collapsed} onToggle={() => toggleZone('style')}>
+    <ZoneHeader label={selectedFeature ? `Style — ${selectedFeature.properties.label}` : 'Style'} collapsed={collapsed} onToggle={() => toggleZone('style')}>
       <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* Quick presets */}

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ElementStyle } from '../elements/types'
 
 export type ToolId =
-  | 'select' | 'direct' | 'pen' | 'line' | 'rect' | 'ellipse' | 'polygon'
+  | 'pan' | 'select' | 'direct' | 'pen' | 'line' | 'rect' | 'ellipse' | 'polygon'
   | 'addNode' | 'delNode' | 'scissors' | 'text' | 'dimension' | 'measure' | 'extrude'
 
 const DEFAULT_STYLE: ElementStyle = {

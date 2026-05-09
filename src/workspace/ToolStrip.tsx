@@ -4,8 +4,9 @@ import { Tooltip } from './components/Tooltip'
 import { useUIStore, type ToolId } from '../store/uiStore'
 
 const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }[]> = [
-  // Selection
+  // Navigation
   [
+    { id: 'pan',     label: 'Pan / Hand',     shortcut: 'H', icon: 'hand' },
     { id: 'select',  label: 'Select',          shortcut: 'V', icon: 'select' },
     { id: 'direct',  label: 'Marquee Select', shortcut: 'A', icon: 'marquee' },
   ],
@@ -26,7 +27,7 @@ const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }
 ]
 
 const KEY_MAP: Record<string, ToolId> = {
-  v: 'select', a: 'direct', p: 'pen', l: 'line', r: 'rect',
+  h: 'pan', v: 'select', a: 'direct', p: 'pen', l: 'line', r: 'rect',
   e: 'ellipse', g: 'polygon', t: 'text', x: 'extrude', m: 'measure',
 }
 

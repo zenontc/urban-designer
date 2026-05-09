@@ -5,6 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { useCanvasStore, makeFeature } from '../store/canvasStore'
 import type { UMPFeature } from '../store/canvasStore'
 import { useLayersStore } from '../store/layersStore'
+import type { LayerItem } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
 import { ELEMENT_CATEGORIES } from '../elements/categories'
 import {
@@ -238,11 +239,16 @@ export function Canvas() {
   const [penDragAnchor, setPenDragAnchor] = useState<{
     anchor: [number, number]; screen: [number, number]
   } | null>(null)
+  // ref mirrors state so stale-closure callbacks always see fresh value
+  const penDragAnchorRef = useRef<{ anchor: [number, number]; screen: [number, number] } | null>(null)
   const penHandledRef = useRef(false)
 
   // Snap
   const [snapTarget, setSnapTarget] = useState<SnapResult | null>(null)
   const snapTargetRef = useRef<SnapResult | null>(null)
+
+  // Select-tool manual pan tracking
+  const panStartRef = useRef<[number, number] | null>(null)
 
   // Selection / node editing
   const [draggingNode, setDraggingNode] = useState<{ featureId: string; path: number[] } | null>(null)
@@ -279,7 +285,22 @@ export function Canvas() {
     setCanvasSearchQuery, toggleCanvasSearch,
   } = useUIStore()
   const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds } = useCanvasStore()
-  const { layers } = useLayersStore()
+  const { layers, groups, addLayer } = useLayersStore()
+
+  function addFeatureWithLayer(feature: Parameters<typeof addFeature>[0]) {
+    addFeature(feature)
+    const defaultGroupId = groups[0]?.id ?? 'elements'
+    const layerEntry: Omit<LayerItem, 'id'> = {
+      elementId: feature.properties.id,
+      label: feature.properties.label,
+      phase: groups[0]?.label ?? 'Elements',
+      visible: true,
+      locked: false,
+      inMetrics: true,
+      groupId: defaultGroupId,
+    }
+    addLayer(layerEntry)
+  }
 
   // Refs for use in callbacks (avoid stale closures)
   const activeToolRef = useRef(activeTool)
@@ -386,6 +407,9 @@ export function Canvas() {
     const map = mapRef.current
     if (!map) return
     const drawingTools = ['pen', 'line', 'rect', 'ellipse', 'polygon', 'text', 'measure']
+    // pan tool: dragPan enabled and interaction div is pointer-events:none, Mapbox handles it
+    // select/direct: dragPan enabled; manual pan tracking via panStartRef
+    // drawing tools: dragPan disabled so map doesn't fight with drawing
     if (drawingTools.includes(activeTool)) {
       map.dragPan.disable()
     } else {
@@ -412,6 +436,7 @@ export function Canvas() {
 
       if (!e.metaKey && !e.ctrlKey) {
         switch (e.key.toLowerCase()) {
+          case 'h': setActiveTool('pan'); break
           case 'v': setActiveTool('select'); break
           case 'a': setActiveTool('direct'); break
           case 'p': setActiveTool('pen'); break
@@ -476,11 +501,16 @@ export function Canvas() {
 
     mouseDownOnFeatureRef.current = false
 
+    // Pan tool handled entirely by Mapbox (interaction div is pointer-events:none)
+    if (tool === 'pan') return
+
     // ── Pen tool: record anchor for potential bezier drag ──
     if (tool === 'pen') {
       const snap = snapTargetRef.current
       const anchor = snap ? snap.lngLat : screenToLngLat(map, sx, sy)
-      setPenDragAnchor({ anchor, screen: [sx, sy] })
+      const val = { anchor, screen: [sx, sy] as [number, number] }
+      setPenDragAnchor(val)
+      penDragAnchorRef.current = val
       return
     }
 
@@ -537,20 +567,11 @@ export function Canvas() {
         // Don't select here; select on click (to distinguish drag vs click)
         return
       }
-      // Shift+drag → marquee selection; plain drag → pan
+      // Shift+drag → marquee selection; plain drag → manual pan via panStartRef
       if (e.shiftKey) {
         setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
       } else {
-        // Forward to map container so Mapbox dragPan takes over
-        mapContainerRef.current?.dispatchEvent(new MouseEvent('mousedown', {
-          bubbles: true, cancelable: true,
-          button: e.button, buttons: e.buttons,
-          clientX: e.clientX, clientY: e.clientY,
-          screenX: e.screenX, screenY: e.screenY,
-          ctrlKey: e.ctrlKey, shiftKey: e.shiftKey,
-          altKey: e.altKey, metaKey: e.metaKey,
-          view: window,
-        }))
+        panStartRef.current = [sx, sy]
       }
     }
   }, [getCanvasXY, layers])
@@ -562,9 +583,19 @@ export function Canvas() {
     const lngLat = screenToLngLat(map, sx, sy)
     setCursorPos([sx, sy])
 
+    // Select-tool manual pan
+    if (panStartRef.current && activeToolRef.current === 'select') {
+      const [lx, ly] = panStartRef.current
+      const dx = sx - lx
+      const dy = sy - ly
+      map.panBy([-dx, -dy], { animate: false, duration: 0 })
+      panStartRef.current = [sx, sy]
+      return
+    }
+
     // Snap detection (drawing tools only)
     const drawingTools = ['pen', 'line', 'rect', 'ellipse', 'polygon']
-    if (drawingTools.includes(activeToolRef.current) && !penDragAnchor) {
+    if (drawingTools.includes(activeToolRef.current) && !penDragAnchorRef.current) {
       const visible = featuresRef.current.filter(
         f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible)
       )
@@ -649,34 +680,39 @@ export function Canvas() {
     if (!map) return
     const [sx, sy] = getCanvasXY(e)
 
+    // Clear select-tool pan
+    panStartRef.current = null
+
     if (draggingRotation) {
       setDraggingRotation(null)
       return
     }
 
     // ── Pen tool: finalize node on mouse up ──
-    if (penDragAnchor) {
+    const pda = penDragAnchorRef.current
+    if (pda) {
       const [ux, uy] = getCanvasXY(e)
-      const dragDist = Math.hypot(ux - penDragAnchor.screen[0], uy - penDragAnchor.screen[1])
+      const dragDist = Math.hypot(ux - pda.screen[0], uy - pda.screen[1])
       const isCorner = dragDist < 5
 
       let newNode: BezierNode
       if (isCorner) {
-        newNode = { anchor: penDragAnchor.anchor, handleIn: null, handleOut: null }
+        newNode = { anchor: pda.anchor, handleIn: null, handleOut: null }
       } else {
-        const anchorS = lngLatToScreen(map, penDragAnchor.anchor)
+        const anchorS = lngLatToScreen(map, pda.anchor)
         const handleOut = screenToLngLat(map, ux, uy)
         const handleIn = screenToLngLat(map, 2 * anchorS[0] - ux, 2 * anchorS[1] - uy)
-        newNode = { anchor: penDragAnchor.anchor, handleIn, handleOut }
+        newNode = { anchor: pda.anchor, handleIn, handleOut }
       }
 
       // Check close-to-first-node for polygon close
       const prev = penNodesRef.current
       if (prev.length >= 3) {
         const [fx, fy] = lngLatToScreen(map, prev[0].anchor)
-        if (Math.hypot(fx - penDragAnchor.screen[0], fy - penDragAnchor.screen[1]) < 14) {
+        if (Math.hypot(fx - pda.screen[0], fy - pda.screen[1]) < 14) {
           finishBezierPolygon(prev)
           setPenDragAnchor(null)
+          penDragAnchorRef.current = null
           penHandledRef.current = true
           return
         }
@@ -684,6 +720,7 @@ export function Canvas() {
 
       setPenNodes(p => [...p, newNode])
       setPenDragAnchor(null)
+      penDragAnchorRef.current = null
       penHandledRef.current = true
       return
     }
@@ -769,7 +806,7 @@ export function Canvas() {
       if (elType) {
         const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
         if (el?.drawMode === 'place') {
-          addFeature(makeFeature(
+          addFeatureWithLayer(makeFeature(
             { type: 'Point', coordinates: lngLat },
             el.id, el.category,
             { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
@@ -801,20 +838,20 @@ export function Canvas() {
     }
 
     if (tool === 'rect') {
-      setDrawNodes(prev => {
-        if (prev.length === 0) return [lngLat]
-        finishRect(prev[0], lngLat)
-        return []
-      })
+      if (drawNodesRef.current.length === 0) {
+        setDrawNodes([lngLat])
+      } else {
+        finishRect(drawNodesRef.current[0], lngLat)
+      }
       return
     }
 
     if (tool === 'ellipse') {
-      setDrawNodes(prev => {
-        if (prev.length === 0) return [lngLat]
-        finishEllipse(prev[0], lngLat)
-        return []
-      })
+      if (drawNodesRef.current.length === 0) {
+        setDrawNodes([lngLat])
+      } else {
+        finishEllipse(drawNodesRef.current[0], lngLat)
+      }
       return
     }
   }, [getCanvasXY, marquee, draggingNode, addFeature, setSelectedIds, layers])
@@ -843,19 +880,19 @@ export function Canvas() {
 
   function finishLine(nodes: [number, number][]) {
     if (nodes.length < 2) return
-    addFeature(makeElFeature({ type: 'LineString', coordinates: nodes }, 'line', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'LineString', coordinates: nodes }, 'line', 'custom'))
     setDrawNodes([])
   }
 
   function finishPolygon(nodes: [number, number][]) {
     if (nodes.length < 3) return
-    addFeature(makeElFeature({ type: 'Polygon', coordinates: [[...nodes, nodes[0]]] }, 'polygon', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'Polygon', coordinates: [[...nodes, nodes[0]]] }, 'polygon', 'custom'))
     setDrawNodes([])
   }
 
   function finishRect(p1: [number, number], p2: [number, number]) {
     const coords: [number, number][] = [p1, [p2[0], p1[1]], p2, [p1[0], p2[1]], p1]
-    addFeature(makeElFeature({ type: 'Polygon', coordinates: [coords] }, 'rect', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'Polygon', coordinates: [coords] }, 'rect', 'custom'))
     setDrawNodes([])
   }
 
@@ -869,14 +906,14 @@ export function Canvas() {
       const a = (i / 64) * Math.PI * 2
       return screenToLngLat(map, cx + rx * Math.cos(a), cy + ry * Math.sin(a))
     })
-    addFeature(makeElFeature({ type: 'Polygon', coordinates: [pts] }, 'ellipse', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'Polygon', coordinates: [pts] }, 'ellipse', 'custom'))
     setDrawNodes([])
   }
 
   function finishBezierLine(nodes: BezierNode[]) {
     if (nodes.length < 2) return
     const coords = bezierNodesToCoords(nodes)
-    addFeature(makeElFeature({ type: 'LineString', coordinates: coords }, 'pen', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'LineString', coordinates: coords }, 'pen', 'custom'))
     setPenNodes([])
   }
 
@@ -884,7 +921,7 @@ export function Canvas() {
     if (nodes.length < 3) return
     const closedNodes = [...nodes, { ...nodes[0] }]
     const coords = bezierNodesToCoords(closedNodes)
-    addFeature(makeElFeature({ type: 'Polygon', coordinates: [[...coords, coords[0]]] }, 'pen', 'custom'))
+    addFeatureWithLayer(makeElFeature({ type: 'Polygon', coordinates: [[...coords, coords[0]]] }, 'pen', 'custom'))
     setPenNodes([])
   }
 
@@ -1362,8 +1399,13 @@ export function Canvas() {
       )}
 
       {/* Interaction capture — on top of SVG, below UI panels */}
+      {/* pointer-events:none in pan mode so Mapbox receives events directly */}
       <div
-        style={{ position: 'absolute', inset: 0, cursor, zIndex: 10 }}
+        style={{
+          position: 'absolute', inset: 0, zIndex: 10,
+          cursor: activeTool === 'pan' ? 'grab' : cursor,
+          pointerEvents: activeTool === 'pan' ? 'none' : undefined,
+        }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1444,7 +1486,7 @@ export function Canvas() {
             onChange={e => setTextInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && textInput.trim()) {
-                addFeature(makeFeature(
+                addFeatureWithLayer(makeFeature(
                   { type: 'Point', coordinates: textPopup.lngLat }, 'text', 'annotations',
                   { label: textInput.trim(), style: { ...activeStyle, textContent: textInput.trim() } as typeof activeStyle },
                 ))
@@ -1456,7 +1498,7 @@ export function Canvas() {
             style={{ width: 180, height: 28, padding: '0 8px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 5, background: 'var(--color-bg-elevated)', color: 'var(--color-text)', outline: 'none' }} />
           <button
             onClick={() => {
-              if (textInput.trim()) addFeature(makeFeature(
+              if (textInput.trim()) addFeatureWithLayer(makeFeature(
                 { type: 'Point', coordinates: textPopup.lngLat }, 'text', 'annotations',
                 { label: textInput.trim(), style: { ...activeStyle, textContent: textInput.trim() } as typeof activeStyle },
               ))

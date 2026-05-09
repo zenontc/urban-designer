@@ -40,44 +40,13 @@ interface LayersState {
   addLayer: (layer: Omit<LayerItem, 'id'>) => void
 }
 
-const INITIAL_GROUPS: LayerGroup[] = [
-  { id: 'existing', label: 'Existing', color: '#94A3B8', collapsed: false },
-  { id: 'phase1', label: 'Phase 1 — Near Term', color: '#2563EB', collapsed: false },
-  { id: 'phase2', label: 'Phase 2 — Mid Term', color: '#16A34A', collapsed: true },
-  { id: 'phase3', label: 'Phase 3 — Long Term', color: '#D97706', collapsed: true },
-]
-
-const SAMPLE_LAYERS: LayerItem[] = [
-  { id: 'e1', elementId: 'e1', label: 'Main Street', phase: 'Existing', visible: true, locked: false, inMetrics: true, groupId: 'existing' },
-  { id: 'e2', elementId: 'e2', label: 'Oak Avenue', phase: 'Existing', visible: true, locked: false, inMetrics: true, groupId: 'existing' },
-  { id: 'e4', elementId: 'e4', label: 'Central Boulevard', phase: 'Existing', visible: true, locked: true, inMetrics: true, groupId: 'existing' },
-  { id: 'e10', elementId: 'e10', label: 'Central Park Lawn', phase: 'Existing', visible: true, locked: false, inMetrics: true, groupId: 'existing' },
-  { id: 'e3', elementId: 'e3', label: 'Protected Bike Lane', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e5', elementId: 'e5', label: 'North Sidewalk', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e6', elementId: 'e6', label: 'South Sidewalk', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e7', elementId: 'e7', label: 'Continental Crossing — Main/Oak', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e13', elementId: 'e13', label: 'Bus Stop — Main St', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e14', elementId: 'e14', label: 'Street Light Row', phase: 'Phase 1', visible: true, locked: false, inMetrics: true, groupId: 'phase1' },
-  { id: 'e8', elementId: 'e8', label: 'Street Tree (Oak)', phase: 'Phase 2', visible: true, locked: false, inMetrics: true, groupId: 'phase2' },
-  { id: 'e9', elementId: 'e9', label: 'Street Tree (Maple)', phase: 'Phase 2', visible: true, locked: false, inMetrics: true, groupId: 'phase2' },
-  { id: 'e11', elementId: 'e11', label: 'Mixed-Use Block A', phase: 'Phase 2', visible: true, locked: false, inMetrics: true, groupId: 'phase2' },
-  { id: 'e12', elementId: 'e12', label: 'Residential Tower', phase: 'Phase 3', visible: true, locked: false, inMetrics: true, groupId: 'phase3' },
-]
-
-function buildInitialOrder(): OrderItem[] {
-  const out: OrderItem[] = []
-  INITIAL_GROUPS.forEach(g => {
-    out.push({ kind: 'group', id: g.id })
-    SAMPLE_LAYERS.filter(l => l.groupId === g.id).forEach(l => out.push({ kind: 'layer', id: l.id }))
-  })
-  return out
-}
+const DEFAULT_GROUP: LayerGroup = { id: 'elements', label: 'Elements', color: '#2563EB', collapsed: false }
 
 export const useLayersStore = create<LayersState>((set) => ({
-  groups: INITIAL_GROUPS,
-  layers: SAMPLE_LAYERS,
-  order: buildInitialOrder(),
-  selectedId: 'e3',
+  groups: [DEFAULT_GROUP],
+  layers: [],
+  order: [{ kind: 'group', id: 'elements' }],
+  selectedId: null,
 
   setSelectedId: (id) => set({ selectedId: id }),
   toggleGroupCollapse: (id) => set((s) => ({ groups: s.groups.map(g => g.id === id ? { ...g, collapsed: !g.collapsed } : g) })),
