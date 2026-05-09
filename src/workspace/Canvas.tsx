@@ -8,7 +8,7 @@ import { useLayersStore } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
 import { ELEMENT_CATEGORIES } from '../elements/categories'
 import {
-  lngLatToScreen, screenToLngLat, haversineFt, fmtDist,
+  lngLatToScreen, screenToLngLat, feetToPixels, haversineFt, fmtDist,
   distToSegment, pointInPolygon, screenBbox,
 } from '../utils/geo'
 
@@ -19,6 +19,95 @@ const MAP_STYLES: Record<string, string> = {
   satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
   streets:   'mapbox://styles/mapbox/streets-v12',
   light:     'mapbox://styles/mapbox/light-v11',
+}
+
+// ── Bezier pen types & helpers ───────────────────────────────────────────────
+
+interface BezierNode {
+  anchor: [number, number]
+  handleIn: [number, number] | null   // incoming control point (lng/lat)
+  handleOut: [number, number] | null  // outgoing control point (lng/lat)
+}
+
+function sampleCubicBezier(
+  p0: [number, number], p1: [number, number],
+  p2: [number, number], p3: [number, number],
+  n = 24,
+): [number, number][] {
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n
+    const b0 = (1 - t) ** 3, b1 = 3 * (1 - t) ** 2 * t
+    const b2 = 3 * (1 - t) * t ** 2, b3 = t ** 3
+    return [b0*p0[0]+b1*p1[0]+b2*p2[0]+b3*p3[0], b0*p0[1]+b1*p1[1]+b2*p2[1]+b3*p3[1]]
+  })
+}
+
+function bezierNodesToCoords(nodes: BezierNode[]): [number, number][] {
+  if (nodes.length < 2) return nodes.map(n => n.anchor)
+  const coords: [number, number][] = [nodes[0].anchor]
+  for (let i = 1; i < nodes.length; i++) {
+    const prev = nodes[i - 1]
+    const curr = nodes[i]
+    const cp1 = prev.handleOut ?? prev.anchor
+    const cp2 = curr.handleIn ?? curr.anchor
+    const sampled = sampleCubicBezier(prev.anchor, cp1, cp2, curr.anchor, 24)
+    coords.push(...sampled.slice(1))
+  }
+  return coords
+}
+
+function bezierNodesToSVGPath(map: mapboxgl.Map, nodes: BezierNode[], extraScreen?: [number, number]): string {
+  if (nodes.length === 0) return ''
+  const [fx, fy] = lngLatToScreen(map, nodes[0].anchor)
+  let d = `M ${fx} ${fy}`
+  for (let i = 1; i < nodes.length; i++) {
+    const prev = nodes[i - 1]
+    const curr = nodes[i]
+    const [x2, y2] = lngLatToScreen(map, curr.anchor)
+    const cp1 = prev.handleOut ? lngLatToScreen(map, prev.handleOut) : lngLatToScreen(map, prev.anchor)
+    const cp2 = curr.handleIn ? lngLatToScreen(map, curr.handleIn) : [x2, y2]
+    d += ` C ${cp1[0]} ${cp1[1]} ${cp2[0]} ${cp2[1]} ${x2} ${y2}`
+  }
+  if (extraScreen) {
+    const last = nodes[nodes.length - 1]
+    const [lx, ly] = lngLatToScreen(map, last.anchor)
+    const lho = last.handleOut ? lngLatToScreen(map, last.handleOut) : [lx, ly]
+    d += ` C ${lho[0]} ${lho[1]} ${extraScreen[0]} ${extraScreen[1]} ${extraScreen[0]} ${extraScreen[1]}`
+  }
+  return d
+}
+
+// ── Snap helper ──────────────────────────────────────────────────────────────
+
+interface SnapResult { lngLat: [number, number]; screen: [number, number] }
+
+function getSnapPoint(
+  map: mapboxgl.Map,
+  features: UMPFeature[],
+  sx: number, sy: number,
+  radius = 12,
+): SnapResult | null {
+  let best: { r: SnapResult; dist: number } | null = null
+  for (const f of features) {
+    const candidates: [number, number][] = getVertices(f.geometry).map(v => v.coord)
+    // midpoints
+    if (f.geometry.type === 'LineString') {
+      const cs = f.geometry.coordinates as [number, number][]
+      for (let i = 0; i < cs.length - 1; i++)
+        candidates.push([(cs[i][0]+cs[i+1][0])/2, (cs[i][1]+cs[i+1][1])/2])
+    } else if (f.geometry.type === 'Polygon') {
+      const ring = (f.geometry.coordinates as [number, number][][])[0]
+      for (let i = 0; i < ring.length - 1; i++)
+        candidates.push([(ring[i][0]+ring[i+1][0])/2, (ring[i][1]+ring[i+1][1])/2])
+    }
+    for (const coord of candidates) {
+      const [px, py] = lngLatToScreen(map, coord)
+      const dist = Math.hypot(px - sx, py - sy)
+      if (dist <= radius && (!best || dist < best.dist))
+        best = { r: { lngLat: coord, screen: [px, py] }, dist }
+    }
+  }
+  return best?.r ?? null
 }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────
@@ -144,6 +233,17 @@ export function Canvas() {
   const [drawNodes, setDrawNodes] = useState<[number, number][]>([])
   const [cursorPos, setCursorPos] = useState<[number, number] | null>(null)
 
+  // Bezier pen state
+  const [penNodes, setPenNodes] = useState<BezierNode[]>([])
+  const [penDragAnchor, setPenDragAnchor] = useState<{
+    anchor: [number, number]; screen: [number, number]
+  } | null>(null)
+  const penHandledRef = useRef(false)
+
+  // Snap
+  const [snapTarget, setSnapTarget] = useState<SnapResult | null>(null)
+  const snapTargetRef = useRef<SnapResult | null>(null)
+
   // Selection / node editing
   const [draggingNode, setDraggingNode] = useState<{ featureId: string; path: number[] } | null>(null)
   const [hoveredFeatureId, setHoveredFeatureId] = useState<string | null>(null)
@@ -188,12 +288,15 @@ export function Canvas() {
   const activeStyleRef = useRef(activeStyle)
   const activeElementTypeRef = useRef(activeElementType)
   const drawNodesRef = useRef(drawNodes)
+  const penNodesRef = useRef(penNodes)
   useEffect(() => { activeToolRef.current = activeTool }, [activeTool])
   useEffect(() => { featuresRef.current = features }, [features])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
   useEffect(() => { activeStyleRef.current = activeStyle }, [activeStyle])
   useEffect(() => { activeElementTypeRef.current = activeElementType }, [activeElementType])
   useEffect(() => { drawNodesRef.current = drawNodes }, [drawNodes])
+  useEffect(() => { penNodesRef.current = penNodes }, [penNodes])
+  useEffect(() => { snapTargetRef.current = snapTarget }, [snapTarget])
 
   // Extrude sync
   useEffect(() => {
@@ -293,6 +396,9 @@ export function Canvas() {
   // Cancel drawing state on tool switch
   useEffect(() => {
     setDrawNodes([])
+    setPenNodes([])
+    setPenDragAnchor(null)
+    setSnapTarget(null)
     setCursorPos(null)
     if (activeTool !== 'measure') setMeasurePts([])
     setTextPopup(null)
@@ -318,6 +424,8 @@ export function Canvas() {
           case 'm': setActiveTool('measure'); break
           case 'escape':
             setDrawNodes([])
+            setPenNodes([])
+            setPenDragAnchor(null)
             setCursorPos(null)
             setMeasurePts([])
             setActiveTool('select')
@@ -367,6 +475,14 @@ export function Canvas() {
     const tool = activeToolRef.current
 
     mouseDownOnFeatureRef.current = false
+
+    // ── Pen tool: record anchor for potential bezier drag ──
+    if (tool === 'pen') {
+      const snap = snapTargetRef.current
+      const anchor = snap ? snap.lngLat : screenToLngLat(map, sx, sy)
+      setPenDragAnchor({ anchor, screen: [sx, sy] })
+      return
+    }
 
     if (tool === 'select' || tool === 'direct') {
       // Check rotation handle first (only in select mode, not direct)
@@ -445,6 +561,17 @@ export function Canvas() {
     const [sx, sy] = getCanvasXY(e)
     const lngLat = screenToLngLat(map, sx, sy)
     setCursorPos([sx, sy])
+
+    // Snap detection (drawing tools only)
+    const drawingTools = ['pen', 'line', 'rect', 'ellipse', 'polygon']
+    if (drawingTools.includes(activeToolRef.current) && !penDragAnchor) {
+      const visible = featuresRef.current.filter(
+        f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible)
+      )
+      setSnapTarget(getSnapPoint(map, visible, sx, sy))
+    } else if (activeToolRef.current !== 'pen') {
+      setSnapTarget(null)
+    }
 
     // Rotation dragging
     if (draggingRotation) {
@@ -527,6 +654,40 @@ export function Canvas() {
       return
     }
 
+    // ── Pen tool: finalize node on mouse up ──
+    if (penDragAnchor) {
+      const [ux, uy] = getCanvasXY(e)
+      const dragDist = Math.hypot(ux - penDragAnchor.screen[0], uy - penDragAnchor.screen[1])
+      const isCorner = dragDist < 5
+
+      let newNode: BezierNode
+      if (isCorner) {
+        newNode = { anchor: penDragAnchor.anchor, handleIn: null, handleOut: null }
+      } else {
+        const anchorS = lngLatToScreen(map, penDragAnchor.anchor)
+        const handleOut = screenToLngLat(map, ux, uy)
+        const handleIn = screenToLngLat(map, 2 * anchorS[0] - ux, 2 * anchorS[1] - uy)
+        newNode = { anchor: penDragAnchor.anchor, handleIn, handleOut }
+      }
+
+      // Check close-to-first-node for polygon close
+      const prev = penNodesRef.current
+      if (prev.length >= 3) {
+        const [fx, fy] = lngLatToScreen(map, prev[0].anchor)
+        if (Math.hypot(fx - penDragAnchor.screen[0], fy - penDragAnchor.screen[1]) < 14) {
+          finishBezierPolygon(prev)
+          setPenDragAnchor(null)
+          penHandledRef.current = true
+          return
+        }
+      }
+
+      setPenNodes(p => [...p, newNode])
+      setPenDragAnchor(null)
+      penHandledRef.current = true
+      return
+    }
+
     if (draggingNode) {
       setDraggingNode(null)
       return
@@ -563,8 +724,17 @@ export function Canvas() {
     if (draggingNode) return
 
     const [sx, sy] = getCanvasXY(e)
-    const lngLat = screenToLngLat(map, sx, sy)
     const tool = activeToolRef.current
+
+    // Pen tool handled entirely in mouseDown/mouseUp
+    if (tool === 'pen') {
+      if (penHandledRef.current) { penHandledRef.current = false; return }
+      return
+    }
+
+    // Use snapped position if available, otherwise raw cursor
+    const snap = snapTargetRef.current
+    const lngLat: [number, number] = snap ? snap.lngLat : screenToLngLat(map, sx, sy)
 
     if (tool === 'text') {
       setTextPopup({ x: sx, y: sy, lngLat })
@@ -617,9 +787,8 @@ export function Canvas() {
       return
     }
 
-    if (tool === 'polygon' || tool === 'pen') {
+    if (tool === 'polygon') {
       const prev = drawNodesRef.current
-      // Check close-to-first-node
       if (prev.length >= 3) {
         const [fx, fy] = lngLatToScreen(map, prev[0])
         if (Math.hypot(fx - sx, fy - sy) < 12) {
@@ -653,8 +822,13 @@ export function Canvas() {
   const handleDoubleClick = useCallback(() => {
     const tool = activeToolRef.current
     const nodes = drawNodesRef.current
+    const pnodes = penNodesRef.current
     if (tool === 'line' && nodes.length >= 2) { finishLine(nodes); return }
-    if ((tool === 'polygon' || tool === 'pen') && nodes.length >= 3) { finishPolygon(nodes); return }
+    if (tool === 'polygon' && nodes.length >= 3) { finishPolygon(nodes); return }
+    if (tool === 'pen') {
+      if (pnodes.length >= 3) { finishBezierPolygon(pnodes); return }
+      if (pnodes.length >= 2) { finishBezierLine(pnodes); return }
+    }
   }, [])
 
   // ── Finish drawing ────────────────────────────────────────────────────────
@@ -697,6 +871,21 @@ export function Canvas() {
     })
     addFeature(makeElFeature({ type: 'Polygon', coordinates: [pts] }, 'ellipse', 'custom'))
     setDrawNodes([])
+  }
+
+  function finishBezierLine(nodes: BezierNode[]) {
+    if (nodes.length < 2) return
+    const coords = bezierNodesToCoords(nodes)
+    addFeature(makeElFeature({ type: 'LineString', coordinates: coords }, 'pen', 'custom'))
+    setPenNodes([])
+  }
+
+  function finishBezierPolygon(nodes: BezierNode[]) {
+    if (nodes.length < 3) return
+    const closedNodes = [...nodes, { ...nodes[0] }]
+    const coords = bezierNodesToCoords(closedNodes)
+    addFeature(makeElFeature({ type: 'Polygon', coordinates: [[...coords, coords[0]]] }, 'pen', 'custom'))
+    setPenNodes([])
   }
 
   function applyExtrude(height: number) {
@@ -861,6 +1050,27 @@ export function Canvas() {
       const isLine = f.geometry.type === 'LineString'
       const sw = style.strokeWidth ?? 2
 
+      // ── Corridor rendering for street-section elements ──
+      if (f.properties.category === 'streets' && isLine) {
+        const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === f.properties.elementType)
+        const rowWidthFt = (el?.defaultProps as { rowWidth?: number })?.rowWidth ?? 30
+        const coords = f.geometry.coordinates as [number, number][]
+        const avgLat = coords.reduce((s, c) => s + (c as [number,number])[1], 0) / coords.length
+        const corrPx = Math.max(4, feetToPixels(map, rowWidthFt, avgLat))
+        const roadColor = style.strokeColor ?? '#374151'
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={corrPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
+            {/* Curb edge */}
+            <path d={path} fill="none" stroke="#111827" strokeWidth={corrPx} strokeLinecap="butt" strokeLinejoin="round" />
+            {/* Road surface */}
+            <path d={path} fill="none" stroke={roadColor} strokeWidth={corrPx - 3} strokeLinecap="butt" strokeLinejoin="round" />
+            {/* Centerline */}
+            <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeLinecap="round" strokeDasharray="8 6" />
+          </g>
+        )
+      }
+
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
           {!isLine && (
@@ -906,14 +1116,89 @@ export function Canvas() {
     const [cx, cy] = cursorPos
     const tool = activeTool
 
-    if ((tool === 'pen' || tool === 'polygon') && drawNodes.length > 0) {
+    // ── Bezier pen preview ───────────────────────────────────────────────────
+    if (tool === 'pen') {
+      const nodes = penNodes
+      const snap = snapTarget
+      const targetScreen: [number, number] = snap ? snap.screen : [cx, cy]
+
+      // Live bezier path
+      const liveHandleIn: [number, number] | null = penDragAnchor
+        ? [2 * lngLatToScreen(map, penDragAnchor.anchor)[0] - cx,
+           2 * lngLatToScreen(map, penDragAnchor.anchor)[1] - cy]
+        : null
+
+      let pathD = ''
+      if (nodes.length > 0) {
+        pathD = bezierNodesToSVGPath(map, nodes)
+        const last = nodes[nodes.length - 1]
+        const [lx, ly] = lngLatToScreen(map, last.anchor)
+        const lho = last.handleOut ? lngLatToScreen(map, last.handleOut) : [lx, ly]
+        const inCP = liveHandleIn ?? targetScreen
+        const anchorS = penDragAnchor ? lngLatToScreen(map, penDragAnchor.anchor) : targetScreen
+        pathD += ` C ${lho[0]} ${lho[1]} ${inCP[0]} ${inCP[1]} ${anchorS[0]} ${anchorS[1]}`
+      }
+
+      return (
+        <g style={{ pointerEvents: 'none' }}>
+          {pathD && <path d={pathD} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" opacity={0.85} />}
+
+          {/* Close-path hint ring */}
+          {nodes.length >= 3 && (() => {
+            const [fx, fy] = lngLatToScreen(map, nodes[0].anchor)
+            const dist = Math.hypot(fx - targetScreen[0], fy - targetScreen[1])
+            return dist < 20 ? <circle cx={fx} cy={fy} r={11} fill="none" stroke="#2563EB" strokeWidth={1.5} opacity={0.6} /> : null
+          })()}
+
+          {/* Confirmed anchor points */}
+          {nodes.map((node, i) => {
+            const [nx, ny] = lngLatToScreen(map, node.anchor)
+            return (
+              <g key={i}>
+                {node.handleOut && (() => {
+                  const [hx, hy] = lngLatToScreen(map, node.handleOut)
+                  return <><line x1={nx} y1={ny} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={3} fill="#2563EB" opacity={0.6} /></>
+                })()}
+                {node.handleIn && (() => {
+                  const [hx, hy] = lngLatToScreen(map, node.handleIn)
+                  return <><line x1={nx} y1={ny} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={3} fill="#2563EB" opacity={0.6} /></>
+                })()}
+                <circle cx={nx} cy={ny} r={4} fill="white" stroke="#2563EB" strokeWidth={1.5} />
+              </g>
+            )
+          })}
+
+          {/* Current drag handles */}
+          {penDragAnchor && (() => {
+            const [ax, ay] = lngLatToScreen(map, penDragAnchor.anchor)
+            const mirX = 2 * ax - cx, mirY = 2 * ay - cy
+            return (
+              <g>
+                <line x1={ax} y1={ay} x2={cx} y2={cy} stroke="#2563EB" strokeWidth={1} opacity={0.7} />
+                <circle cx={cx} cy={cy} r={3.5} fill="#2563EB" opacity={0.8} />
+                <line x1={ax} y1={ay} x2={mirX} y2={mirY} stroke="#2563EB" strokeWidth={1} opacity={0.4} />
+                <circle cx={mirX} cy={mirY} r={3.5} fill="#2563EB" opacity={0.4} />
+                <circle cx={ax} cy={ay} r={4.5} fill="white" stroke="#2563EB" strokeWidth={1.5} />
+              </g>
+            )
+          })()}
+
+          {/* Snap indicator */}
+          {snap && <circle cx={snap.screen[0]} cy={snap.screen[1]} r={10} fill="none" stroke="#F59E0B" strokeWidth={2} />}
+        </g>
+      )
+    }
+
+    // ── Polygon preview ──────────────────────────────────────────────────────
+    if (tool === 'polygon' && drawNodes.length > 0) {
       const pts = drawNodes.map(n => lngLatToScreen(map, n))
+      const snapS = snapTarget?.screen ?? [cx, cy]
       const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
       return (
         <g style={{ pointerEvents: 'none' }}>
-          <path d={`${d} L ${cx} ${cy}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" opacity={0.85} />
+          <path d={`${d} L ${snapS[0]} ${snapS[1]}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" opacity={0.85} />
           {drawNodes.length >= 3 && (
-            <line x1={cx} y1={cy} x2={pts[0][0]} y2={pts[0][1]} stroke="#2563EB" strokeWidth={1} strokeDasharray="4 4" opacity={0.4} />
+            <line x1={snapS[0]} y1={snapS[1]} x2={pts[0][0]} y2={pts[0][1]} stroke="#2563EB" strokeWidth={1} strokeDasharray="4 4" opacity={0.4} />
           )}
           {pts.map(([x, y], i) => (
             <circle key={i} cx={x} cy={y} r={4} fill="white" stroke="#2563EB" strokeWidth={1.5} />
@@ -921,19 +1206,22 @@ export function Canvas() {
           {drawNodes.length >= 3 && (
             <circle cx={pts[0][0]} cy={pts[0][1]} r={9} fill="none" stroke="#2563EB" strokeWidth={1.5} opacity={0.55} />
           )}
+          {snapTarget && <circle cx={snapTarget.screen[0]} cy={snapTarget.screen[1]} r={10} fill="none" stroke="#F59E0B" strokeWidth={2} />}
         </g>
       )
     }
 
     if (tool === 'line' && drawNodes.length > 0) {
       const pts = drawNodes.map(n => lngLatToScreen(map, n))
+      const snapS = snapTarget?.screen ?? [cx, cy]
       const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
       return (
         <g style={{ pointerEvents: 'none' }}>
-          <path d={`${d} L ${cx} ${cy}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" />
+          <path d={`${d} L ${snapS[0]} ${snapS[1]}`} fill="none" stroke="#2563EB" strokeWidth={2} strokeDasharray="6 4" />
           {pts.map(([x, y], i) => (
             <circle key={i} cx={x} cy={y} r={4} fill="white" stroke="#2563EB" strokeWidth={1.5} />
           ))}
+          {snapTarget && <circle cx={snapTarget.screen[0]} cy={snapTarget.screen[1]} r={10} fill="none" stroke="#F59E0B" strokeWidth={2} />}
         </g>
       )
     }
