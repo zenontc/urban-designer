@@ -421,8 +421,21 @@ export function Canvas() {
         // Don't select here; select on click (to distinguish drag vs click)
         return
       }
-      // Start marquee
-      setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
+      // Shift+drag → marquee selection; plain drag → pan
+      if (e.shiftKey) {
+        setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
+      } else {
+        // Forward to map container so Mapbox dragPan takes over
+        mapContainerRef.current?.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true,
+          button: e.button, buttons: e.buttons,
+          clientX: e.clientX, clientY: e.clientY,
+          screenX: e.screenX, screenY: e.screenY,
+          ctrlKey: e.ctrlKey, shiftKey: e.shiftKey,
+          altKey: e.altKey, metaKey: e.metaKey,
+          view: window,
+        }))
+      }
     }
   }, [getCanvasXY, layers])
 
