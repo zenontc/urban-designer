@@ -237,6 +237,13 @@ function rotateGeometry(
   return g
 }
 
+function angleSnap(from: [number, number], to: [number, number]): [number, number] {
+  const dx = to[0] - from[0], dy = to[1] - from[1]
+  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+  const dist = Math.hypot(dx, dy)
+  return [from[0] + dist * Math.cos(angle), from[1] + dist * Math.sin(angle)]
+}
+
 // Hit-test features at a screen position
 function hitTestFeatures(
   map: mapboxgl.Map,
@@ -302,6 +309,12 @@ export function Canvas() {
   // Select-tool manual pan tracking
   const panStartRef = useRef<[number, number] | null>(null)
 
+  // Shift key for angle snap
+  const shiftHeldRef = useRef(false)
+
+  // Right-click context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; featureId: string } | null>(null)
+
   // Selection / node editing
   const [draggingNode, setDraggingNode] = useState<{ featureId: string; path: number[] } | null>(null)
   const [hoveredFeatureId, setHoveredFeatureId] = useState<string | null>(null)
@@ -358,7 +371,7 @@ export function Canvas() {
     nightMode, mode3D, showCanvasSearch, canvasSearchQuery,
     setCanvasSearchQuery, toggleCanvasSearch,
   } = useUIStore()
-  const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds } = useCanvasStore()
+  const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds, bringToFront, sendToBack } = useCanvasStore()
   const { layers, groups, addLayer } = useLayersStore()
 
   function addFeatureWithLayer(feature: Parameters<typeof addFeature>[0]) {
@@ -716,6 +729,7 @@ export function Canvas() {
     if (!map) return
     const [sx, sy] = getCanvasXY(e)
     const lngLat = screenToLngLat(map, sx, sy)
+    shiftHeldRef.current = e.shiftKey
     setCursorPos([sx, sy])
 
     // Manual pan when dragging empty space (select tool)
@@ -862,7 +876,7 @@ export function Canvas() {
       const hit = hitTestFeatures(map, visible, sx, sy)
       setHoveredFeatureId(hit?.properties.id ?? null)
     }
-  }, [getCanvasXY, draggingRotation, draggingNode, marquee, updateGeometry, layers])
+  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, marquee, updateGeometry, updateFeature, layers])
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
@@ -969,14 +983,14 @@ export function Canvas() {
 
     // Unused — suppress lint warning
     void sx; void sy
-  }, [getCanvasXY, draggingRotation, draggingNode, marquee, setSelectedIds])
+  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, marquee, setSelectedIds])
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
     if (!map) return
-    // Skip if we were dragging a marquee
     if (marquee) return
     if (draggingNode) return
+    setContextMenu(null)
 
     const [sx, sy] = getCanvasXY(e)
     const tool = activeToolRef.current
@@ -1044,7 +1058,14 @@ export function Canvas() {
     }
 
     if (tool === 'line') {
-      setDrawNodes(prev => [...prev, lngLat])
+      const prev = drawNodesRef.current
+      let pt = lngLat
+      if (e.shiftKey && prev.length > 0) {
+        const fromS = lngLatToScreen(map, prev[prev.length - 1])
+        const toS = snap ? snap.screen : [sx, sy] as [number, number]
+        pt = screenToLngLat(map, ...angleSnap(fromS, toS))
+      }
+      setDrawNodes(p => [...p, pt])
       return
     }
 
@@ -1057,7 +1078,13 @@ export function Canvas() {
           return
         }
       }
-      setDrawNodes(p => [...p, lngLat])
+      let pt = lngLat
+      if (e.shiftKey && prev.length > 0) {
+        const fromS = lngLatToScreen(map, prev[prev.length - 1])
+        const toS = snap ? snap.screen : [sx, sy] as [number, number]
+        pt = screenToLngLat(map, ...angleSnap(fromS, toS))
+      }
+      setDrawNodes(p => [...p, pt])
       return
     }
 
@@ -1125,6 +1152,19 @@ export function Canvas() {
     }
   }, [getCanvasXY, layers, setSelectedIds])
 
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const map = mapRef.current
+    if (!map) return
+    const [sx, sy] = getCanvasXY(e)
+    const visible = featuresRef.current.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
+    const hit = hitTestFeatures(map, visible, sx, sy)
+    if (hit) {
+      setSelectedIds([hit.properties.id])
+      setContextMenu({ x: sx, y: sy, featureId: hit.properties.id })
+    }
+  }, [getCanvasXY, layers, setSelectedIds])
+
   // ── Finish drawing ────────────────────────────────────────────────────────
   function makeElFeature(geom: GeoJSON.Geometry, fallbackType: string, fallbackCat: string) {
     const elType = activeElementTypeRef.current ?? fallbackType
@@ -1183,6 +1223,18 @@ export function Canvas() {
     feat.properties.bezierNodes = nodes
     addFeatureWithLayer(feat)
     setPenNodes([])
+  }
+
+  function duplicateSelected() {
+    if (!contextMenu) return
+    const feat = featuresRef.current.find(f => f.properties.id === contextMenu.featureId)
+    if (!feat) return
+    const newId = 'f_' + Math.random().toString(36).slice(2, 10)
+    const now = new Date().toISOString()
+    const dup: UMPFeature = { ...feat, id: newId, properties: { ...feat.properties, id: newId, createdAt: now, updatedAt: now } }
+    addFeatureWithLayer(dup)
+    setSelectedIds([newId])
+    setContextMenu(null)
   }
 
   function applyExtrude(height: number) {
@@ -1518,7 +1570,8 @@ export function Canvas() {
     // ── Polygon preview ──────────────────────────────────────────────────────
     if (tool === 'polygon' && drawNodes.length > 0) {
       const pts = drawNodes.map(n => lngLatToScreen(map, n))
-      const snapS = snapTarget?.screen ?? [cx, cy]
+      const rawS = snapTarget?.screen ?? [cx, cy] as [number, number]
+      const snapS = shiftHeldRef.current ? angleSnap(pts[pts.length - 1] as [number, number], rawS) : rawS
       const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
       return (
         <g style={{ pointerEvents: 'none' }}>
@@ -1539,7 +1592,8 @@ export function Canvas() {
 
     if (tool === 'line' && drawNodes.length > 0) {
       const pts = drawNodes.map(n => lngLatToScreen(map, n))
-      const snapS = snapTarget?.screen ?? [cx, cy]
+      const rawS = snapTarget?.screen ?? [cx, cy] as [number, number]
+      const snapS = shiftHeldRef.current ? angleSnap(pts[pts.length - 1] as [number, number], rawS) : rawS
       const d = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
       return (
         <g style={{ pointerEvents: 'none' }}>
@@ -1725,6 +1779,7 @@ export function Canvas() {
         onMouseUp={handleMouseUp}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         onWheel={e => {
           const map = mapRef.current
           if (!map) return
@@ -1863,6 +1918,34 @@ export function Canvas() {
               ? 'Click to start measuring'
               : `Total: ${fmtDist(totalDist)} · Click to add points · Esc to clear`}
           </div>
+        </div>
+      )}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          style={{ position: 'absolute', left: contextMenu.x, top: contextMenu.y, zIndex: 60,
+            background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)',
+            borderRadius: 8, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', minWidth: 168 }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          {([
+            { label: 'Duplicate', action: () => duplicateSelected() },
+            { label: 'Bring to Front', action: () => { bringToFront(contextMenu.featureId); setContextMenu(null) } },
+            { label: 'Send to Back',  action: () => { sendToBack(contextMenu.featureId);  setContextMenu(null) } },
+            null,
+            { label: 'Delete', action: () => { deleteFeatures([contextMenu.featureId]); setContextMenu(null) }, danger: true },
+          ] as Array<{ label: string; action: () => void; danger?: boolean } | null>).map((item, i) =>
+            item === null
+              ? <div key={i} style={{ height: 1, background: 'var(--color-border)', margin: '4px 0' }} />
+              : <button key={i} onClick={item.action}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px',
+                    fontSize: 13, border: 'none', borderRadius: 5, cursor: 'pointer',
+                    background: 'transparent', color: item.danger ? '#EF4444' : 'var(--color-text)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-accent-subtle)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >{item.label}</button>
+          )}
         </div>
       )}
 
