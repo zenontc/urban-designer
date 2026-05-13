@@ -275,6 +275,54 @@ function hitTestFeatures(
   return null
 }
 
+// ── Polyline helpers ────────────────────────────────────────────────────────
+
+function samplePolyline(map: mapboxgl.Map, coords: [number, number][], spacingPx: number): [number, number][] {
+  const pts: [number, number][] = []
+  let accumulated = 0
+  const screen = coords.map(c => lngLatToScreen(map, c))
+  for (let i = 1; i < screen.length; i++) {
+    const [x1, y1] = screen[i - 1], [x2, y2] = screen[i]
+    const segLen = Math.hypot(x2 - x1, y2 - y1)
+    let d = accumulated === 0 ? spacingPx / 2 : spacingPx - accumulated
+    while (d <= segLen) {
+      const t = d / segLen
+      pts.push(screenToLngLat(map, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t))
+      d += spacingPx
+    }
+    accumulated = segLen - (d - spacingPx)
+    if (accumulated >= segLen) accumulated = accumulated - segLen
+  }
+  return pts
+}
+
+function splitLineAtPoint(
+  coords: [number, number][],
+  map: mapboxgl.Map,
+  sx: number, sy: number,
+  hitRadius = 12,
+): { a: [number, number][]; b: [number, number][] } | null {
+  let bestDist = Infinity, bestSeg = -1, bestT = 0
+  for (let i = 0; i < coords.length - 1; i++) {
+    const [x1, y1] = lngLatToScreen(map, coords[i])
+    const [x2, y2] = lngLatToScreen(map, coords[i + 1])
+    const dx = x2 - x1, dy = y2 - y1
+    const len2 = dx * dx + dy * dy
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((sx - x1) * dx + (sy - y1) * dy) / len2))
+    const px = x1 + t * dx, py = y1 + t * dy
+    const dist = Math.hypot(sx - px, sy - py)
+    if (dist < bestDist) { bestDist = dist; bestSeg = i; bestT = t }
+  }
+  if (bestDist > hitRadius || bestSeg < 0) return null
+  const [x1, y1] = lngLatToScreen(map, coords[bestSeg])
+  const [x2, y2] = lngLatToScreen(map, coords[bestSeg + 1])
+  const splitPt = screenToLngLat(map, x1 + bestT * (x2 - x1), y1 + bestT * (y2 - y1))
+  return {
+    a: [...coords.slice(0, bestSeg + 1), splitPt],
+    b: [splitPt, ...coords.slice(bestSeg + 1)],
+  }
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 export function Canvas() {
@@ -308,6 +356,10 @@ export function Canvas() {
 
   // Select-tool manual pan tracking
   const panStartRef = useRef<[number, number] | null>(null)
+
+  // Space key for temporary pan
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const spaceHeldRef = useRef(false)
 
   // Shift key for angle snap
   const shiftHeldRef = useRef(false)
@@ -547,6 +599,33 @@ export function Canvas() {
             setSelectedIds([])
             setNodeEditingId(null)
             break
+          case 'arrowleft':
+          case 'arrowright':
+          case 'arrowup':
+          case 'arrowdown': {
+            const map = mapRef.current
+            if (!map || !selectedIdsRef.current.length) break
+            e.preventDefault()
+            const ids = selectedIdsRef.current
+            const feat = featuresRef.current.find(f => f.properties.id === ids[0])
+            if (!feat) break
+            const coords = getVertices(feat.geometry)
+            if (!coords.length) break
+            const avgLat = coords.reduce((s, v) => s + v.coord[1], 0) / coords.length
+            const oneFtPx = feetToPixels(map, 1, avgLat)
+            const dx = e.key === 'ArrowLeft' ? -oneFtPx : e.key === 'ArrowRight' ? oneFtPx : 0
+            const dy = e.key === 'ArrowUp' ? -oneFtPx : e.key === 'ArrowDown' ? oneFtPx : 0
+            function nudgeCoord(coord: [number, number]): [number, number] {
+              const [px, py] = lngLatToScreen(map!, coord)
+              return screenToLngLat(map!, px + dx, py + dy)
+            }
+            const g = JSON.parse(JSON.stringify(feat.geometry)) as GeoJSON.Geometry
+            if (g.type === 'Point') g.coordinates = nudgeCoord(g.coordinates as [number, number])
+            else if (g.type === 'LineString') g.coordinates = (g.coordinates as [number,number][]).map(nudgeCoord)
+            else if (g.type === 'Polygon') g.coordinates = (g.coordinates as [number,number][][]).map(r => r.map(nudgeCoord))
+            useCanvasStore.getState().updateGeometry(ids[0], g)
+            break
+          }
           case 'delete':
           case 'backspace':
             if (selectedIdsRef.current.length) deleteFeatures(selectedIdsRef.current)
@@ -575,6 +654,29 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Space key tracking (temporary pan) ───────────────────────────────────
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.code === 'Space' && !e.repeat) {
+        const tag = (e.target as HTMLElement).tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+        spaceHeldRef.current = true
+        setSpaceHeld(true)
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'Space') {
+        spaceHeldRef.current = false
+        setSpaceHeld(false)
+        panStartRef.current = null
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
+  }, [])
+
   // ── Canvas coordinates ────────────────────────────────────────────────────
   const getCanvasXY = useCallback((e: React.MouseEvent): [number, number] => {
     const rect = outerRef.current?.getBoundingClientRect()
@@ -591,6 +693,12 @@ export function Canvas() {
     const tool = activeToolRef.current
 
     mouseDownOnFeatureRef.current = false
+
+    // ── Space+drag: temporary pan regardless of tool ──
+    if (spaceHeldRef.current) {
+      panStartRef.current = [sx, sy]
+      return
+    }
 
     // ── Pen tool: record anchor for potential bezier drag ──
     if (tool === 'pen') {
@@ -732,8 +840,8 @@ export function Canvas() {
     shiftHeldRef.current = e.shiftKey
     setCursorPos([sx, sy])
 
-    // Manual pan when dragging empty space (select tool)
-    if (panStartRef.current && (activeToolRef.current === 'select' || activeToolRef.current === 'direct')) {
+    // Manual pan when dragging empty space (select tool) or space held
+    if (panStartRef.current && (spaceHeldRef.current || activeToolRef.current === 'select' || activeToolRef.current === 'direct')) {
       const [lx, ly] = panStartRef.current
       map.panBy([-(sx - lx), -(sy - ly)], { animate: false, duration: 0 })
       panStartRef.current = [sx, sy]
@@ -1105,7 +1213,99 @@ export function Canvas() {
       }
       return
     }
-  }, [getCanvasXY, marquee, draggingNode, addFeature, setSelectedIds, layers])
+
+    if (tool === 'addNode') {
+      const selId = selectedIdsRef.current[0]
+      if (!selId) return
+      const feat = featuresRef.current.find(f => f.properties.id === selId)
+      if (!feat) return
+      if (feat.geometry.type === 'LineString') {
+        const coords = (feat.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        let bestSeg = -1, bestT = 0, bestDist = Infinity
+        for (let i = 0; i < coords.length - 1; i++) {
+          const [x1, y1] = lngLatToScreen(map, coords[i])
+          const [x2, y2] = lngLatToScreen(map, coords[i + 1])
+          const dx = x2 - x1, dy = y2 - y1, len2 = dx*dx + dy*dy
+          const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((sx-x1)*dx+(sy-y1)*dy)/len2))
+          const dist = Math.hypot(sx - (x1+t*dx), sy - (y1+t*dy))
+          if (dist < bestDist) { bestDist = dist; bestSeg = i; bestT = t }
+        }
+        if (bestSeg >= 0 && bestDist < 20) {
+          const [x1, y1] = lngLatToScreen(map, coords[bestSeg])
+          const [x2, y2] = lngLatToScreen(map, coords[bestSeg + 1])
+          const newPt = screenToLngLat(map, x1 + bestT*(x2-x1), y1 + bestT*(y2-y1))
+          const newCoords = [...coords.slice(0, bestSeg+1), newPt, ...coords.slice(bestSeg+1)]
+          const g = { ...feat.geometry, coordinates: newCoords } as GeoJSON.Geometry
+          updateGeometry(selId, g)
+        }
+      } else if (feat.geometry.type === 'Polygon') {
+        const ring = ((feat.geometry as GeoJSON.Polygon).coordinates as [number,number][][])[0]
+        let bestSeg = -1, bestT = 0, bestDist = Infinity
+        for (let i = 0; i < ring.length - 1; i++) {
+          const [x1, y1] = lngLatToScreen(map, ring[i])
+          const [x2, y2] = lngLatToScreen(map, ring[i + 1])
+          const dx = x2-x1, dy = y2-y1, len2 = dx*dx+dy*dy
+          const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((sx-x1)*dx+(sy-y1)*dy)/len2))
+          const dist = Math.hypot(sx-(x1+t*dx), sy-(y1+t*dy))
+          if (dist < bestDist) { bestDist = dist; bestSeg = i; bestT = t }
+        }
+        if (bestSeg >= 0 && bestDist < 20) {
+          const [x1, y1] = lngLatToScreen(map, ring[bestSeg])
+          const [x2, y2] = lngLatToScreen(map, ring[bestSeg + 1])
+          const newPt = screenToLngLat(map, x1+bestT*(x2-x1), y1+bestT*(y2-y1))
+          const newRing = [...ring.slice(0, bestSeg+1), newPt, ...ring.slice(bestSeg+1)]
+          const g = { ...feat.geometry, coordinates: [newRing] } as GeoJSON.Geometry
+          updateGeometry(selId, g)
+        }
+      }
+      return
+    }
+
+    if (tool === 'delNode') {
+      const selId = selectedIdsRef.current[0]
+      if (!selId) return
+      const feat = featuresRef.current.find(f => f.properties.id === selId)
+      if (!feat) return
+      const verts = getVertices(feat.geometry)
+      const hit = verts.findIndex(v => {
+        const [vx, vy] = lngLatToScreen(map, v.coord)
+        return Math.hypot(vx - sx, vy - sy) < 10
+      })
+      if (hit < 0) return
+      if (feat.geometry.type === 'LineString') {
+        const coords = (feat.geometry as GeoJSON.LineString).coordinates as [number,number][]
+        if (coords.length <= 2) return
+        const newCoords = coords.filter((_, i) => i !== hit)
+        updateGeometry(selId, { ...feat.geometry, coordinates: newCoords } as GeoJSON.Geometry)
+      } else if (feat.geometry.type === 'Polygon') {
+        const ring = ((feat.geometry as GeoJSON.Polygon).coordinates as [number,number][][])[0]
+        if (ring.length <= 4) return // min 3 vertices + closing point
+        const newRing = ring.slice(0, -1).filter((_, i) => i !== hit)
+        updateGeometry(selId, { ...feat.geometry, coordinates: [[...newRing, newRing[0]]] } as GeoJSON.Geometry)
+      }
+      return
+    }
+
+    if (tool === 'scissors') {
+      const selId = selectedIdsRef.current[0]
+      if (!selId) return
+      const feat = featuresRef.current.find(f => f.properties.id === selId)
+      if (!feat || feat.geometry.type !== 'LineString') return
+      const coords = (feat.geometry as GeoJSON.LineString).coordinates as [number,number][]
+      const split = splitLineAtPoint(coords, map, sx, sy, 16)
+      if (!split) return
+      if (split.a.length < 2 || split.b.length < 2) return
+      const featA: UMPFeature = { ...feat, id: 'f_'+Math.random().toString(36).slice(2,10), properties: { ...feat.properties, id: 'f_'+Math.random().toString(36).slice(2,10) } }
+      featA.geometry = { type: 'LineString', coordinates: split.a }
+      const featB: UMPFeature = { ...feat, id: 'f_'+Math.random().toString(36).slice(2,10), properties: { ...feat.properties, id: 'f_'+Math.random().toString(36).slice(2,10) } }
+      featB.geometry = { type: 'LineString', coordinates: split.b }
+      deleteFeatures([selId])
+      addFeatureWithLayer(featA)
+      addFeatureWithLayer(featB)
+      setSelectedIds([featA.properties.id])
+      return
+    }
+  }, [getCanvasXY, marquee, draggingNode, addFeature, setSelectedIds, layers, updateGeometry, deleteFeatures])
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
@@ -1251,7 +1451,8 @@ export function Canvas() {
     text: 'text', measure: 'crosshair', extrude: 'default',
   }
   let cursor = CURSORS[activeTool] ?? 'default'
-  if (draggingScale) cursor = 'nwse-resize'
+  if (spaceHeld) cursor = panStartRef.current ? 'grabbing' : 'grab'
+  else if (draggingScale) cursor = 'nwse-resize'
   else if (draggingRotation) cursor = 'grabbing'
   else if (hoveredScaleHandle) cursor = 'nwse-resize'
   else if (hoveredRotHandle) cursor = 'grab'
@@ -1422,6 +1623,78 @@ export function Canvas() {
                   style={{ userSelect: 'none' }}>
                   {fmtDist(d)}
                 </text>
+              )
+            })}
+          </g>
+        )
+      }
+
+      // ── Crosswalk rendering ──
+      if ((f.properties.elementType === 'std-crosswalk' || f.properties.elementType === 'continental-crosswalk' || f.properties.elementType === 'raised-crosswalk') && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        if (coords.length >= 2) {
+          const [x1, y1] = lngLatToScreen(map, coords[0])
+          const [x2, y2] = lngLatToScreen(map, coords[coords.length - 1])
+          const len = Math.hypot(x2 - x1, y2 - y1)
+          const ang = Math.atan2(y2 - y1, x2 - x1)
+          const widthPx = feetToPixels(map, 6, coords[0][1])
+          const stripeW = f.properties.elementType === 'continental-crosswalk' ? 14 : 10
+          const gapW = f.properties.elementType === 'continental-crosswalk' ? 6 : 10
+          const stripes: React.ReactNode[] = []
+          for (let d = 0; d < len; d += stripeW + gapW) {
+            const w = Math.min(stripeW, len - d)
+            stripes.push(<rect key={d} x={x1 + d * Math.cos(ang)} y={y1 + d * Math.sin(ang) - widthPx / 2} width={w} height={widthPx} fill="white" opacity={0.9} transform={`rotate(${ang * 180 / Math.PI},${x1 + d * Math.cos(ang)},${y1 + d * Math.sin(ang)})`} />)
+          }
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <rect x={x1} y={y1 - widthPx / 2} width={len} height={widthPx} fill="#555" transform={`rotate(${ang * 180 / Math.PI},${x1},${y1})`} />
+              {stripes}
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={widthPx + 6} strokeOpacity={0.35} />}
+            </g>
+          )
+        }
+      }
+
+      // ── Street tree row rendering ──
+      if (f.properties.elementType === 'street-tree' && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        const spacingPx = feetToPixels(map, 25, coords[0][1])
+        const samples = samplePolyline(map, coords, spacingPx)
+        const fill = style.fillColor ?? '#22C55E'
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <path d={path} fill="none" stroke="rgba(0,0,0,0.2)" strokeWidth={1} strokeDasharray="4 4" />
+            {samples.map((pt, i) => {
+              const [px, py] = lngLatToScreen(map, pt)
+              return (
+                <g key={i}>
+                  <circle cx={px} cy={py} r={10} fill={fill} fillOpacity={0.8} stroke="rgba(0,0,0,0.3)" strokeWidth={1} />
+                  <circle cx={px - 3} cy={py - 3} r={4} fill={fill} fillOpacity={0.5} />
+                </g>
+              )
+            })}
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={3} strokeOpacity={0.5} />}
+          </g>
+        )
+      }
+
+      // ── String lights rendering ──
+      if (f.properties.elementType === 'string-lights' && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        const spacingPx = feetToPixels(map, 6, coords[0][1])
+        const samples = samplePolyline(map, coords, spacingPx)
+        const lightColor = style.strokeColor ?? '#FCD34D'
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <path d={path} fill="none" stroke="rgba(100,80,20,0.5)" strokeWidth={1} />
+            {samples.map((pt, i) => {
+              const [px, py] = lngLatToScreen(map, pt)
+              return (
+                <g key={i}>
+                  <circle cx={px} cy={py} r={5} fill={lightColor} fillOpacity={0.25} />
+                  <circle cx={px} cy={py} r={3} fill={lightColor} fillOpacity={0.6} />
+                  <circle cx={px} cy={py} r={1.5} fill={lightColor} />
+                </g>
               )
             })}
           </g>

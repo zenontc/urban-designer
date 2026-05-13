@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { Icon } from './components/Icon'
 import { Tooltip } from './components/Tooltip'
 import { useUIStore } from '../store/uiStore'
+import { useCanvasStore } from '../store/canvasStore'
 import type { ElementStyle } from '../elements/types'
 
 const STROKE_COLORS = ['#0EA5E9','#22C55E','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14B8A6','#F97316','#6366F1','#0F172A','#64748B','#FFFFFF']
@@ -58,8 +59,14 @@ function StyleButton({ label, onClick, active, children }: { label: string; onCl
 
 export function StyleBar() {
   const { activeStyle, setActiveStyle } = useUIStore()
+  const { features, selectedIds } = useCanvasStore()
   const [open, setOpen] = useState<Popover>(null)
   const barRef = useRef<HTMLDivElement>(null)
+
+  const selFeat = selectedIds.length === 1 ? features.find(f => f.properties.id === selectedIds[0]) : null
+  const isLine = selFeat?.geometry.type === 'LineString'
+  const isText = selFeat?.properties.elementType === 'text'
+  const isPoint = selFeat?.geometry.type === 'Point' && !isText
 
   function update(patch: Partial<ElementStyle>) {
     setActiveStyle({ ...activeStyle, ...patch })
@@ -79,8 +86,8 @@ export function StyleBar() {
     }}
       onMouseLeave={() => setOpen(null)}
     >
-      {/* Stroke Color */}
-      <div style={{ position: 'relative' }}>
+      {/* Stroke Color — hidden for text */}
+      {!isText && <div style={{ position: 'relative' }}>
         <StyleButton label="Stroke Color" onClick={() => toggle('stroke')} active={open === 'stroke'}>
           <div style={{ width: 14, height: 14, borderRadius: 2, background: s.strokeColor, border: '1px solid rgba(0,0,0,0.15)', flexShrink: 0 }} />
           <span>Stroke</span>
@@ -99,10 +106,10 @@ export function StyleBar() {
             </div>
           </PopoverPanel>
         )}
-      </div>
+      </div>}
 
-      {/* Fill Color */}
-      <div style={{ position: 'relative' }}>
+      {/* Fill Color — hidden for lines and text */}
+      {!isLine && !isText && <div style={{ position: 'relative' }}>
         <StyleButton label="Fill Color" onClick={() => toggle('fill')} active={open === 'fill'}>
           <div style={{ width: 14, height: 14, borderRadius: 2, background: s.fillColor, border: '1px solid rgba(0,0,0,0.15)', flexShrink: 0 }} />
           <span>Fill</span>
@@ -121,10 +128,10 @@ export function StyleBar() {
             </div>
           </PopoverPanel>
         )}
-      </div>
+      </div>}
 
-      {/* Fill Opacity */}
-      <div style={{ position: 'relative' }}>
+      {/* Fill Opacity — hidden for lines and text */}
+      {!isLine && !isText && <div style={{ position: 'relative' }}>
         <StyleButton label="Fill Opacity" onClick={() => toggle('opacity')} active={open === 'opacity'}>
           <Icon name="opacity" size={13} />
           <span>{s.fillOpacity}%</span>
@@ -145,12 +152,12 @@ export function StyleBar() {
             </div>
           </PopoverPanel>
         )}
-      </div>
+      </div>}
 
-      <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
+      {!isLine && !isText && <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />}
 
-      {/* Stroke Width */}
-      <div style={{ position: 'relative' }}>
+      {/* Stroke Width — hidden for text */}
+      {!isText && <div style={{ position: 'relative' }}>
         <StyleButton label="Stroke Width" onClick={() => toggle('width')} active={open === 'width'}>
           <Icon name="strokeWidth" size={13} />
           <span>{s.strokeWidth}px</span>
@@ -171,10 +178,10 @@ export function StyleBar() {
             </div>
           </PopoverPanel>
         )}
-      </div>
+      </div>}
 
-      {/* Dash Pattern */}
-      <div style={{ position: 'relative' }}>
+      {/* Dash Pattern — hidden for text and points */}
+      {!isText && !isPoint && <div style={{ position: 'relative' }}>
         <StyleButton label="Line Style" onClick={() => toggle('dash')} active={open === 'dash'}>
           <svg width="20" height="10" viewBox="0 0 20 10">
             {s.dashArray.length === 0
@@ -202,36 +209,38 @@ export function StyleBar() {
             </div>
           </PopoverPanel>
         )}
-      </div>
+      </div>}
 
-      <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
+      {!isText && !isPoint && <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />}
 
-      {/* Line Cap / Join */}
-      <Tooltip label="Round Cap" placement="bottom">
-        <button onClick={() => update({ lineCap: s.lineCap === 'round' ? 'butt' : 'round' })} style={{
-          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.lineCap === 'round' ? 'var(--color-accent)' : 'var(--color-border)'}`,
-          background: s.lineCap === 'round' ? 'var(--color-accent-subtle)' : 'transparent',
-          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--color-text-sec)',
-        }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        </button>
-      </Tooltip>
+      {/* Line Cap / Join — hidden for text and points */}
+      {!isText && !isPoint && <>
+        <Tooltip label="Round Cap" placement="bottom">
+          <button onClick={() => update({ lineCap: s.lineCap === 'round' ? 'butt' : 'round' })} style={{
+            width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.lineCap === 'round' ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: s.lineCap === 'round' ? 'var(--color-accent-subtle)' : 'transparent',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--color-text-sec)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          </button>
+        </Tooltip>
 
-      <Tooltip label="Miter Join" placement="bottom">
-        <button onClick={() => update({ lineJoin: s.lineJoin === 'miter' ? 'round' : 'miter' })} style={{
-          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.lineJoin === 'miter' ? 'var(--color-accent)' : 'var(--color-border)'}`,
-          background: s.lineJoin === 'miter' ? 'var(--color-accent-subtle)' : 'transparent',
-          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--color-text-sec)',
-        }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <polyline points="2,12 7,2 12,12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="miter" />
-          </svg>
-        </button>
-      </Tooltip>
+        <Tooltip label="Miter Join" placement="bottom">
+          <button onClick={() => update({ lineJoin: s.lineJoin === 'miter' ? 'round' : 'miter' })} style={{
+            width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.lineJoin === 'miter' ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: s.lineJoin === 'miter' ? 'var(--color-accent-subtle)' : 'transparent',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--color-text-sec)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <polyline points="2,12 7,2 12,12" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="miter" />
+            </svg>
+          </button>
+        </Tooltip>
+      </>}
 
       <div style={{ flex: 1 }} />
 

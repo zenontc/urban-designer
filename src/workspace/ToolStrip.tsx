@@ -22,11 +22,18 @@ const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }
     { id: 'extrude', label: 'Extrude', shortcut: 'X', icon: 'extrude' },
     { id: 'measure', label: 'Measure', shortcut: 'M', icon: 'measure' },
   ],
+  // Node tools
+  [
+    { id: 'addNode',  label: 'Add Node',    shortcut: 'A', icon: 'addNode' },
+    { id: 'delNode',  label: 'Delete Node', shortcut: '',  icon: 'deleteNode' },
+    { id: 'scissors', label: 'Scissors',    shortcut: 'C', icon: 'scissors' },
+  ],
 ]
 
 const KEY_MAP: Record<string, ToolId> = {
   v: 'select', p: 'pen', l: 'line', r: 'rect',
   e: 'ellipse', g: 'polygon', t: 'text', x: 'extrude', m: 'measure',
+  a: 'addNode', c: 'scissors',
 }
 
 export function ToolStrip() {
