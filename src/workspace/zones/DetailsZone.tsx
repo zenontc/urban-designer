@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
-import { ZoneHeader } from '../components/ZoneHeader'
 import { useUIStore } from '../../store/uiStore'
 import { useCanvasStore } from '../../store/canvasStore'
 import { ELEMENT_CATEGORIES } from '../../elements/categories'
+import { CrossSectionInline } from '../CrossSectionInline'
 import { lineStringLengthFt, polygonAreaSqFt, sqFtToAcres, sqFtToHa, ftToM, fmtNum } from '../../utils/geoUtils'
 import type { UMPFeature } from '../../store/canvasStore'
 import type { UMPFeatureProperties } from '../../elements/types'
@@ -34,23 +34,30 @@ function computeStats(feature: UMPFeature, units: 'ft' | 'm') {
 }
 
 export function DetailsZone() {
-  const { zoneCollapsed, toggleZone, units } = useUIStore()
+  const { units } = useUIStore()
   const { selectedIds, features, updateFeature, deleteFeature } = useCanvasStore()
-  const collapsed = zoneCollapsed['details']
 
   const selectedFeatures = features.filter(f => selectedIds.includes(f.properties.id))
   const single = selectedFeatures.length === 1 ? selectedFeatures[0] : null
 
   return (
-    <ZoneHeader label="Details" collapsed={collapsed} onToggle={() => toggleZone('details')}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {single ? (
-        <FeatureEditor feature={single} updateFeature={updateFeature} deleteFeature={deleteFeature} units={units} />
+        <>
+          <FeatureEditor feature={single} updateFeature={updateFeature} deleteFeature={deleteFeature} units={units} />
+          {single.properties.category === 'streets' && (
+            <>
+              <div style={{ height: 1, background: 'var(--color-border)' }} />
+              <CrossSectionInline />
+            </>
+          )}
+        </>
       ) : selectedFeatures.length > 1 ? (
         <MultiSelection features={selectedFeatures} updateFeature={updateFeature} />
       ) : (
         <EmptyState />
       )}
-    </ZoneHeader>
+    </div>
   )
 }
 

@@ -30,12 +30,7 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
 
   useAutoSave()
 
-  // Show cross-section editor when a street element is active
-  useEffect(() => {
-    if (activeElementType && activeElementType.startsWith('street-')) {
-      setShowCrossSection(true)
-    }
-  }, [activeElementType])
+  // Cross-section editor is now inline in DetailsZone — no floating panel trigger needed
 
   // Right-click context menu on canvas
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -80,7 +75,6 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
 
           {/* Floating panels */}
           {showShadowPanel && <ShadowPanel />}
-          {showCrossSection && <CrossSectionEditor onClose={() => setShowCrossSection(false)} />}
           {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
 
           {/* Context menu */}

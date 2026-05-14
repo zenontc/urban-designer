@@ -32,7 +32,7 @@ function Swatch({ color, active, onClick }: { color: string; active: boolean; on
 function PopoverPanel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{
-      position: 'absolute', top: 'calc(100% + 6px)', left: '50%', transform: 'translateX(-50%)',
+      position: 'absolute', top: 'calc(100% + 6px)', left: 0,
       background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)',
       borderRadius: 8, boxShadow: '0 8px 24px rgba(15,23,42,0.14)',
       padding: 10, zIndex: 9999, ...style,
@@ -81,7 +81,7 @@ export function StyleBar() {
   return (
     <div ref={barRef} style={{
       height: 36, background: 'var(--color-bg-panel)', borderBottom: '1px solid var(--color-border)',
-      display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, gap: 6,
+      display: 'flex', alignItems: 'center', paddingLeft: 56, paddingRight: 12, gap: 6,
       position: 'relative', zIndex: 50, flexShrink: 0,
     }}
       onMouseLeave={() => setOpen(null)}
@@ -211,6 +211,39 @@ export function StyleBar() {
         )}
       </div>}
 
+      {/* Text styles — only for text elements */}
+      {isText && <>
+        <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />
+        <Tooltip label="Font Size" placement="bottom">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--color-text-sec)' }}>
+            <Icon name="text" size={13} />
+            <select value={s.fontSize} onChange={e => update({ fontSize: Number(e.target.value) })} style={{
+              height: 24, padding: '0 4px', fontSize: 11, borderRadius: 4,
+              border: '1px solid var(--color-border)', background: 'var(--color-bg-panel)',
+              color: 'var(--color-text)', cursor: 'pointer',
+            }}>
+              {[8,9,10,11,12,14,16,18,20,24,28,32,36,48,64].map(sz => (
+                <option key={sz} value={sz}>{sz}</option>
+              ))}
+            </select>
+          </div>
+        </Tooltip>
+        <Tooltip label="Bold" placement="bottom">
+          <button onClick={() => update({ fontWeight: s.fontWeight === 700 ? 400 : 700 })} style={{
+            width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.fontWeight === 700 ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: s.fontWeight === 700 ? 'var(--color-accent-subtle)' : 'transparent',
+            cursor: 'pointer', fontWeight: 700, fontSize: 13, color: s.fontWeight === 700 ? 'var(--color-accent)' : 'var(--color-text-sec)',
+          }}>B</button>
+        </Tooltip>
+        <Tooltip label="Italic" placement="bottom">
+          <button onClick={() => update({ fontStyle: s.fontStyle === 'italic' ? 'normal' : 'italic' })} style={{
+            width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.fontStyle === 'italic' ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: s.fontStyle === 'italic' ? 'var(--color-accent-subtle)' : 'transparent',
+            cursor: 'pointer', fontStyle: 'italic', fontSize: 13, color: s.fontStyle === 'italic' ? 'var(--color-accent)' : 'var(--color-text-sec)',
+          }}>I</button>
+        </Tooltip>
+      </>}
+
       {!isText && !isPoint && <div style={{ width: 1, height: 20, background: 'var(--color-border)' }} />}
 
       {/* Line Cap / Join — hidden for text and points */}
@@ -242,43 +275,6 @@ export function StyleBar() {
         </Tooltip>
       </>}
 
-      <div style={{ flex: 1 }} />
-
-      {/* Font size (for text tool) */}
-      <Tooltip label="Font Size" placement="bottom">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--color-text-sec)' }}>
-          <Icon name="text" size={13} />
-          <select value={s.fontSize} onChange={e => update({ fontSize: Number(e.target.value) })} style={{
-            height: 24, padding: '0 4px', fontSize: 11, borderRadius: 4,
-            border: '1px solid var(--color-border)', background: 'var(--color-bg-panel)',
-            color: 'var(--color-text)', cursor: 'pointer',
-          }}>
-            {[8,9,10,11,12,14,16,18,20,24,28,32,36,48,64].map(sz => (
-              <option key={sz} value={sz}>{sz}</option>
-            ))}
-          </select>
-        </div>
-      </Tooltip>
-
-      <Tooltip label="Bold" placement="bottom">
-        <button onClick={() => update({ fontWeight: s.fontWeight === 700 ? 400 : 700 })} style={{
-          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.fontWeight === 700 ? 'var(--color-accent)' : 'var(--color-border)'}`,
-          background: s.fontWeight === 700 ? 'var(--color-accent-subtle)' : 'transparent',
-          cursor: 'pointer', fontWeight: 700, fontSize: 13, color: s.fontWeight === 700 ? 'var(--color-accent)' : 'var(--color-text-sec)',
-        }}>
-          B
-        </button>
-      </Tooltip>
-
-      <Tooltip label="Italic" placement="bottom">
-        <button onClick={() => update({ fontStyle: s.fontStyle === 'italic' ? 'normal' : 'italic' })} style={{
-          width: 26, height: 26, borderRadius: 4, border: `1px solid ${s.fontStyle === 'italic' ? 'var(--color-accent)' : 'var(--color-border)'}`,
-          background: s.fontStyle === 'italic' ? 'var(--color-accent-subtle)' : 'transparent',
-          cursor: 'pointer', fontStyle: 'italic', fontSize: 13, color: s.fontStyle === 'italic' ? 'var(--color-accent)' : 'var(--color-text-sec)',
-        }}>
-          I
-        </button>
-      </Tooltip>
     </div>
   )
 }

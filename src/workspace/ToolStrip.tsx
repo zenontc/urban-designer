@@ -4,9 +4,16 @@ import { Tooltip } from './components/Tooltip'
 import { useUIStore, type ToolId } from '../store/uiStore'
 
 const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }[]> = [
-  // Navigation
+  // Selection
   [
-    { id: 'select',  label: 'Select',   shortcut: 'V', icon: 'select' },
+    { id: 'select',  label: 'Select',         shortcut: 'V', icon: 'select' },
+    { id: 'marquee', label: 'Marquee Select', shortcut: '',  icon: 'marquee' },
+  ],
+  // Node tools
+  [
+    { id: 'addNode',  label: 'Add Node',    shortcut: 'A', icon: 'addNode' },
+    { id: 'delNode',  label: 'Delete Node', shortcut: '',  icon: 'deleteNode' },
+    { id: 'scissors', label: 'Scissors',    shortcut: 'C', icon: 'scissors' },
   ],
   // Drawing
   [
@@ -16,17 +23,11 @@ const TOOLS: Array<{ id: ToolId; label: string; shortcut: string; icon: string }
     { id: 'ellipse', label: 'Ellipse',     shortcut: 'E', icon: 'ellipse' },
     { id: 'polygon', label: 'Polygon',     shortcut: 'G', icon: 'polygon' },
   ],
-  // Edit
+  // Annotation
   [
     { id: 'text',    label: 'Text',    shortcut: 'T', icon: 'text' },
     { id: 'extrude', label: 'Extrude', shortcut: 'X', icon: 'extrude' },
     { id: 'measure', label: 'Measure', shortcut: 'M', icon: 'measure' },
-  ],
-  // Node tools
-  [
-    { id: 'addNode',  label: 'Add Node',    shortcut: 'A', icon: 'addNode' },
-    { id: 'delNode',  label: 'Delete Node', shortcut: '',  icon: 'deleteNode' },
-    { id: 'scissors', label: 'Scissors',    shortcut: 'C', icon: 'scissors' },
   ],
 ]
 

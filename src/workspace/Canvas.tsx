@@ -275,6 +275,18 @@ function hitTestFeatures(
   return null
 }
 
+function translateGeometry(map: mapboxgl.Map, geom: GeoJSON.Geometry, dx: number, dy: number): GeoJSON.Geometry {
+  function tr(coord: [number, number]): [number, number] {
+    const [px, py] = lngLatToScreen(map, coord)
+    return screenToLngLat(map, px + dx, py + dy)
+  }
+  const g = JSON.parse(JSON.stringify(geom)) as GeoJSON.Geometry
+  if (g.type === 'Point') g.coordinates = tr(g.coordinates as [number, number])
+  else if (g.type === 'LineString') g.coordinates = (g.coordinates as [number,number][]).map(tr)
+  else if (g.type === 'Polygon') g.coordinates = (g.coordinates as [number,number][][]).map(r => r.map(tr))
+  return g
+}
+
 // ── Polyline helpers ────────────────────────────────────────────────────────
 
 function samplePolyline(map: mapboxgl.Map, coords: [number, number][], spacingPx: number): [number, number][] {
@@ -366,6 +378,13 @@ export function Canvas() {
 
   // Right-click context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; featureId: string } | null>(null)
+
+  // Drag to move selected object
+  const [draggingMove, setDraggingMove] = useState<{
+    featureId: string; startScreen: [number, number]
+    originalGeom: GeoJSON.Geometry; originalBezierNodes?: BezierNode[]
+  } | null>(null)
+  const wasDraggingRef = useRef(false)
 
   // Selection / node editing
   const [draggingNode, setDraggingNode] = useState<{ featureId: string; path: number[] } | null>(null)
@@ -700,6 +719,12 @@ export function Canvas() {
       return
     }
 
+    // ── Marquee tool: always start marquee selection ──
+    if (tool === 'marquee') {
+      setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
+      return
+    }
+
     // ── Pen tool: record anchor for potential bezier drag ──
     if (tool === 'pen') {
       const snap = snapTargetRef.current
@@ -820,7 +845,17 @@ export function Canvas() {
       const hit = hitTestFeatures(map, visible, sx, sy)
       if (hit) {
         mouseDownOnFeatureRef.current = true
-        // Don't select here; select on click (to distinguish drag vs click)
+        // If clicking a selected feature (not in node edit), start move drag
+        if (!inNodeEdit && selectedIdsRef.current.includes(hit.properties.id)) {
+          setDraggingMove({
+            featureId: hit.properties.id,
+            startScreen: [sx, sy],
+            originalGeom: JSON.parse(JSON.stringify(hit.geometry)),
+            originalBezierNodes: hit.properties.bezierNodes
+              ? JSON.parse(JSON.stringify(hit.properties.bezierNodes))
+              : undefined,
+          })
+        }
         return
       }
       // Shift+drag → marquee selection; plain drag → manual pan via panStartRef
@@ -830,7 +865,7 @@ export function Canvas() {
         panStartRef.current = [sx, sy]
       }
     }
-  }, [getCanvasXY, layers])
+  }, [getCanvasXY, layers, activeBezierNode])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
@@ -845,6 +880,25 @@ export function Canvas() {
       const [lx, ly] = panStartRef.current
       map.panBy([-(sx - lx), -(sy - ly)], { animate: false, duration: 0 })
       panStartRef.current = [sx, sy]
+      return
+    }
+
+    // Move dragging (drag selected feature to move it)
+    if (draggingMove) {
+      const dx = sx - draggingMove.startScreen[0]
+      const dy = sy - draggingMove.startScreen[1]
+      const newGeom = translateGeometry(map, draggingMove.originalGeom, dx, dy)
+      updateGeometry(draggingMove.featureId, newGeom)
+      if (draggingMove.originalBezierNodes) {
+        const movedNodes = draggingMove.originalBezierNodes.map((n: BezierNode) => {
+          const [ax, ay] = lngLatToScreen(map, n.anchor)
+          const newAnchor = screenToLngLat(map, ax + dx, ay + dy)
+          const newIn = n.handleIn ? (() => { const [hx, hy] = lngLatToScreen(map, n.handleIn!); return screenToLngLat(map, hx + dx, hy + dy) })() : null
+          const newOut = n.handleOut ? (() => { const [hx, hy] = lngLatToScreen(map, n.handleOut!); return screenToLngLat(map, hx + dx, hy + dy) })() : null
+          return { anchor: newAnchor, handleIn: newIn, handleOut: newOut }
+        })
+        updateFeature(draggingMove.featureId, { bezierNodes: movedNodes as UMPFeatureProperties['bezierNodes'] })
+      }
       return
     }
 
@@ -984,7 +1038,7 @@ export function Canvas() {
       const hit = hitTestFeatures(map, visible, sx, sy)
       setHoveredFeatureId(hit?.properties.id ?? null)
     }
-  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, marquee, updateGeometry, updateFeature, layers])
+  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, draggingMove, marquee, updateGeometry, updateFeature, layers])
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
@@ -994,17 +1048,26 @@ export function Canvas() {
     // Clear select-tool pan
     panStartRef.current = null
 
+    if (draggingMove) {
+      wasDraggingRef.current = true
+      setDraggingMove(null)
+      return
+    }
+
     if (draggingBezierHandle) {
+      wasDraggingRef.current = true
       setDraggingBezierHandle(null)
       return
     }
 
     if (draggingScale) {
+      wasDraggingRef.current = true
       setDraggingScale(null)
       return
     }
 
     if (draggingRotation) {
+      wasDraggingRef.current = true
       setDraggingRotation(null)
       return
     }
@@ -1091,13 +1154,14 @@ export function Canvas() {
 
     // Unused — suppress lint warning
     void sx; void sy
-  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, marquee, setSelectedIds])
+  }, [getCanvasXY, draggingRotation, draggingNode, draggingScale, draggingBezierHandle, draggingMove, marquee, setSelectedIds])
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const map = mapRef.current
     if (!map) return
     if (marquee) return
     if (draggingNode) return
+    if (wasDraggingRef.current) { wasDraggingRef.current = false; return }
     setContextMenu(null)
 
     const [sx, sy] = getCanvasXY(e)
@@ -1320,10 +1384,12 @@ export function Canvas() {
     }
     if (tool === 'measure') {
       const pts = measurePtsRef.current
-      if (pts.length >= 2) {
-        const dist = pts.reduce((acc, p, i) => i === 0 ? 0 : acc + haversineFt(pts[i - 1], p), 0)
+      // Remove the last duplicate point added by the second click of the double-click
+      const trimmed = pts.length > 1 ? pts.slice(0, -1) : pts
+      if (trimmed.length >= 2) {
+        const dist = trimmed.reduce((acc, p, i) => i === 0 ? 0 : acc + haversineFt(trimmed[i - 1], p), 0)
         addFeatureWithLayer(makeFeature(
-          { type: 'LineString', coordinates: pts },
+          { type: 'LineString', coordinates: trimmed },
           'measurement', 'annotations',
           { label: `Measurement (${fmtDist(dist)})`, style: { ...activeStyleRef.current, strokeColor: '#F59E0B', strokeWidth: 2, dashArray: [5, 3], fillOpacity: 0 } },
         ))
@@ -1446,9 +1512,10 @@ export function Canvas() {
 
   // ── Cursor ────────────────────────────────────────────────────────────────
   const CURSORS: Record<string, string> = {
-    select: 'default', direct: 'default', pen: 'crosshair', line: 'crosshair',
+    select: 'default', marquee: 'crosshair', direct: 'default', pen: 'crosshair', line: 'crosshair',
     rect: 'crosshair', ellipse: 'crosshair', polygon: 'crosshair',
     text: 'text', measure: 'crosshair', extrude: 'default',
+    addNode: 'crosshair', delNode: 'crosshair', scissors: 'crosshair',
   }
   let cursor = CURSORS[activeTool] ?? 'default'
   if (spaceHeld) cursor = panStartRef.current ? 'grabbing' : 'grab'
@@ -1954,12 +2021,10 @@ export function Canvas() {
                         const [hx, hy] = lngLatToScreen(map, node.handleOut)
                         return <><line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#2563EB" strokeWidth={1} opacity={0.5} /><circle cx={hx} cy={hy} r={4} fill="#2563EB" opacity={0.8} /></>
                       })()}
-                      {/* Circle = smooth node, square = corner node */}
-                      {(node.handleIn || node.handleOut) ? (
-                        <circle cx={ax} cy={ay} r={4.5} fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
-                      ) : (
-                        <rect x={ax - 4} y={ay - 4} width={8} height={8} fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
-                      )}
+                      {/* All nodes are squares; smooth nodes get a rounded corner hint */}
+                      <rect x={ax - 4} y={ay - 4} width={8} height={8}
+                        rx={(node.handleIn || node.handleOut) ? 2 : 0}
+                        fill={isActive ? '#2563EB' : 'white'} stroke="#2563EB" strokeWidth={1.5} />
                     </g>
                   )
                 })
@@ -2028,6 +2093,14 @@ export function Canvas() {
           <g id="active-draw-layer">{renderActiveDraw()}</g>
           <g id="place-preview-layer">{renderPlacePreview()}</g>
           <g id="selection-layer">{renderSelection()}</g>
+
+          {/* Rotate cursor hint */}
+          {hoveredRotHandle && cursorPos && (
+            <g transform={`translate(${cursorPos[0] + 10},${cursorPos[1] - 10})`} style={{ pointerEvents: 'none' }}>
+              <path d="M0,9 A9,9,0,0,0,9,0" fill="none" stroke="#2563EB" strokeWidth="2.5" strokeLinecap="round"/>
+              <path d="M9,0 L6,-4 M9,0 L13,1" stroke="#2563EB" strokeWidth="2" strokeLinecap="round"/>
+            </g>
+          )}
           <g id="measure-layer">{renderMeasure()}</g>
 
           {/* Marquee selection box */}

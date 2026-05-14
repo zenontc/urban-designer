@@ -1,5 +1,6 @@
-import React, { useRef, useCallback, useState } from 'react'
+import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { useUIStore } from '../store/uiStore'
+import { useCanvasStore } from '../store/canvasStore'
 import { StyleZone } from './zones/StyleZone'
 import { DetailsZone } from './zones/DetailsZone'
 import { LayersZone } from './zones/LayersZone'
@@ -31,8 +32,17 @@ const TABS: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
 
 export function RightPanel() {
   const { rightPanelWidth, setRightPanelWidth } = useUIStore()
+  const { features, selectedIds } = useCanvasStore()
   const [activeTab, setActiveTab] = useState<Tab>('style')
   const dragging = useRef(false)
+
+  // Auto-switch to Details tab when a street feature is selected
+  useEffect(() => {
+    if (selectedIds.length === 1) {
+      const f = features.find(x => x.properties.id === selectedIds[0])
+      if (f?.properties.category === 'streets') setActiveTab('details')
+    }
+  }, [selectedIds, features])
   const startX = useRef(0)
   const startW = useRef(0)
 

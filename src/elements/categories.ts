@@ -136,12 +136,12 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
       { id: 'dog-park', label: 'Dog Park', category: 'furniture', drawMode: 'polygon', defaultStyle: { fillColor: '#D9F99D', fillOpacity: 60 }, defaultProps: {} },
       { id: 'community-garden', label: 'Community Garden', category: 'furniture', drawMode: 'polygon', defaultStyle: { fillColor: '#84CC16', fillOpacity: 60 }, defaultProps: {} },
       { id: 'sports-court', label: 'Sports Court / Field', category: 'furniture', drawMode: 'polygon', defaultStyle: { fillColor: '#374151', fillOpacity: 80 }, defaultProps: { sport: 'basketball' } },
-      { id: 'ev-charging', label: 'EV Charging Station', category: 'furniture', drawMode: 'place', defaultStyle: { fillColor: '#0D9488' }, defaultProps: {} },
     ]
   },
   {
     id: 'utilities', label: 'Utilities', icon: 'settings', color: '#64748B',
     elements: [
+      { id: 'ev-charging', label: 'EV Charging Station', category: 'utilities', drawMode: 'place', defaultStyle: { fillColor: '#0D9488' }, defaultProps: {} },
       { id: 'catch-basin', label: 'Stormwater Catch Basin', category: 'utilities', drawMode: 'place', defaultStyle: { fillColor: '#374151' }, defaultProps: {} },
       { id: 'storm-pipe', label: 'Stormwater Pipe', category: 'utilities', drawMode: 'line', defaultStyle: { strokeColor: '#3B82F6', lineType: 'dashed', strokeWidth: 1 }, defaultProps: {} },
       { id: 'storm-outfall', label: 'Stormwater Outfall', category: 'utilities', drawMode: 'place', defaultStyle: { fillColor: '#3B82F6' }, defaultProps: {} },
@@ -155,7 +155,7 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
-    id: 'landscape', label: 'Landscape', icon: 'water', color: '#22C55E',
+    id: 'landscape', label: 'Landscape Surfaces', icon: 'water', color: '#22C55E',
     elements: [
       { id: 'lawn', label: 'Lawn / Turf', category: 'landscape', drawMode: 'polygon', defaultStyle: { fillColor: '#22C55E', fillOpacity: 85 }, defaultProps: {} },
       { id: 'meadow', label: 'Meadow / Native Planting', category: 'landscape', drawMode: 'polygon', defaultStyle: { fillColor: '#84CC16', fillOpacity: 85 }, defaultProps: {} },
