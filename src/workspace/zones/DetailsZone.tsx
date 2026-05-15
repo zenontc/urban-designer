@@ -3,6 +3,7 @@ import { useUIStore } from '../../store/uiStore'
 import { useCanvasStore } from '../../store/canvasStore'
 import { ELEMENT_CATEGORIES } from '../../elements/categories'
 import { CrossSectionInline } from '../CrossSectionInline'
+import type { StreetLane } from '../CrossSectionInline'
 import { lineStringLengthFt, polygonAreaSqFt, sqFtToAcres, sqFtToHa, ftToM, fmtNum } from '../../utils/geoUtils'
 import type { UMPFeature } from '../../store/canvasStore'
 import type { UMPFeatureProperties } from '../../elements/types'
@@ -48,7 +49,10 @@ export function DetailsZone() {
           {single.properties.category === 'streets' && (
             <>
               <div style={{ height: 1, background: 'var(--color-border)' }} />
-              <CrossSectionInline />
+              <CrossSectionInline
+                feature={single}
+                onUpdate={(lanes: StreetLane[]) => updateFeature(single.properties.id, { streetLanes: lanes })}
+              />
             </>
           )}
         </>

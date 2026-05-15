@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Icon } from './components/Icon'
+import type { UMPFeature } from '../store/canvasStore'
 
-interface Lane {
+export interface StreetLane {
   id: string
   label: string
   width: number
@@ -9,7 +10,7 @@ interface Lane {
   icon: string
 }
 
-const DEFAULT_LANES: Lane[] = [
+const DEFAULT_LANES: StreetLane[] = [
   { id: '1',  label: 'Building Setback', width: 10, color: '#F1F5F9', icon: '🏠' },
   { id: '2',  label: 'Sidewalk',          width: 12, color: '#E2E8F0', icon: '🚶' },
   { id: '3',  label: 'Tree Buffer',       width: 6,  color: '#DCFCE7', icon: '🌳' },
@@ -23,26 +24,44 @@ const DEFAULT_LANES: Lane[] = [
   { id: '11', label: 'Building Setback',  width: 10, color: '#F1F5F9', icon: '🏠' },
 ]
 
-export function CrossSectionInline() {
-  const [lanes, setLanes] = useState<Lane[]>(DEFAULT_LANES)
+interface CrossSectionInlineProps {
+  feature: UMPFeature
+  onUpdate: (lanes: StreetLane[]) => void
+}
+
+export function CrossSectionInline({ feature, onUpdate }: CrossSectionInlineProps) {
+  const [lanes, setLanes] = useState<StreetLane[]>(() =>
+    feature.properties.streetLanes ?? DEFAULT_LANES
+  )
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [units, setUnits] = useState<'ft' | 'm'>('ft')
+
+  // Sync when feature changes (different street selected)
+  useEffect(() => {
+    setLanes(feature.properties.streetLanes ?? DEFAULT_LANES)
+    setSelectedId(null)
+  }, [feature.properties.id])
 
   const totalWidth = lanes.reduce((s, l) => s + l.width, 0)
   const conv = (w: number) => units === 'm' ? (w * 0.3048).toFixed(1) : w.toString()
   const selected = lanes.find(l => l.id === selectedId)
 
-  function updateLane(id: string, patch: Partial<Lane>) {
+  function updateLane(id: string, patch: Partial<StreetLane>) {
     setLanes(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l))
   }
   function addLane() {
     const newId = Date.now().toString()
-    setLanes(prev => [...prev, { id: newId, label: 'New Lane', width: 10, color: '#E2E8F0', icon: '➕' }])
+    const newLanes: StreetLane[] = [...lanes, { id: newId, label: 'New Lane', width: 10, color: '#E2E8F0', icon: '➕' }]
+    setLanes(newLanes)
     setSelectedId(newId)
   }
   function removeLane(id: string) {
     setLanes(prev => prev.filter(l => l.id !== id))
     if (selectedId === id) setSelectedId(null)
+  }
+
+  function handleApply() {
+    onUpdate(lanes)
   }
 
   return (
@@ -127,7 +146,7 @@ export function CrossSectionInline() {
           <button onClick={addLane} style={{ height: 26, padding: '0 8px', fontSize: 10, fontWeight: 500, borderRadius: 4, border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-text-sec)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
             <Icon name="plus" size={11} /> Add Lane
           </button>
-          <button style={{ height: 26, padding: '0 8px', fontSize: 10, fontWeight: 600, borderRadius: 4, border: 'none', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer' }}>
+          <button onClick={handleApply} style={{ height: 26, padding: '0 8px', fontSize: 10, fontWeight: 600, borderRadius: 4, border: 'none', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer' }}>
             Apply
           </button>
         </div>

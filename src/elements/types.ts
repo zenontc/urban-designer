@@ -78,6 +78,7 @@ export interface UMPFeatureProperties {
   treeData?: TreeData
   landUseData?: LandUseData
   lightData?: LightData
+  streetLanes?: Array<{ id: string; label: string; width: number; color: string; icon: string }>
   textContent?: string
   fontSize?: number
   fontFamily?: string

@@ -1272,11 +1272,29 @@ export function Canvas() {
       if (elType) {
         const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === elType)
         if (el?.drawMode === 'place') {
-          addFeatureWithLayer(makeFeature(
-            { type: 'Point', coordinates: lngLat },
-            el.id, el.category,
-            { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
-          ))
+          const wFt = (el.defaultProps as { widthFt?: number }).widthFt
+          const hFt = (el.defaultProps as { heightFt?: number }).heightFt
+          if (wFt && hFt) {
+            const [lng, lat] = lngLat
+            const dLng = (wFt / 2 / 3.28084) / (111319.9 * Math.cos(lat * Math.PI / 180))
+            const dLat = (hFt / 2 / 3.28084) / 111320
+            const coords: [number, number][] = [
+              [lng - dLng, lat - dLat], [lng + dLng, lat - dLat],
+              [lng + dLng, lat + dLat], [lng - dLng, lat + dLat],
+              [lng - dLng, lat - dLat],
+            ]
+            addFeatureWithLayer(makeFeature(
+              { type: 'Polygon', coordinates: [coords] },
+              el.id, el.category,
+              { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
+            ))
+          } else {
+            addFeatureWithLayer(makeFeature(
+              { type: 'Point', coordinates: lngLat },
+              el.id, el.category,
+              { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
+            ))
+          }
           setActiveElementType(null)
           return
         }
@@ -1838,6 +1856,133 @@ export function Canvas() {
     )
   }
 
+  function renderSportsMarkings(elId: string, left: number, top: number, w: number, h: number, cx2: number, cy2: number) {
+    const s: React.CSSProperties = { pointerEvents: 'none' }
+    if (elId === 'soccer-field') {
+      const cr = Math.min(w, h) * 0.11
+      return (
+        <g style={s}>
+          <line x1={cx2} y1={top} x2={cx2} y2={top + h} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={cx2} cy={cy2} r={cr} fill="none" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={cx2} cy={cy2} r={2.5} fill="white" opacity={0.9} />
+          <rect x={left} y={cy2 - h * 0.28} width={w * 0.15} height={h * 0.56} fill="none" stroke="white" strokeWidth={1} opacity={0.75} />
+          <rect x={left + w - w * 0.15} y={cy2 - h * 0.28} width={w * 0.15} height={h * 0.56} fill="none" stroke="white" strokeWidth={1} opacity={0.75} />
+          <rect x={left} y={cy2 - h * 0.13} width={w * 0.07} height={h * 0.26} fill="none" stroke="white" strokeWidth={1} opacity={0.6} />
+          <rect x={left + w - w * 0.07} y={cy2 - h * 0.13} width={w * 0.07} height={h * 0.26} fill="none" stroke="white" strokeWidth={1} opacity={0.6} />
+          <circle cx={left + w * 0.11} cy={cy2} r={2} fill="white" opacity={0.8} />
+          <circle cx={left + w * 0.89} cy={cy2} r={2} fill="white" opacity={0.8} />
+        </g>
+      )
+    }
+    if (elId === 'basketball-court') {
+      const kw = w * 0.16, kh = h * 0.38, bd = w * 0.07
+      return (
+        <g style={s}>
+          <line x1={cx2} y1={top} x2={cx2} y2={top + h} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={cx2} cy={cy2} r={Math.min(w, h) * 0.13} fill="none" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <rect x={left} y={cy2 - kh / 2} width={kw} height={kh} fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <path d={`M ${left + kw} ${cy2 - kh / 2} A ${kh / 2} ${kh / 2} 0 0 1 ${left + kw} ${cy2 + kh / 2}`} fill="none" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={left + bd} cy={cy2} r={3.5} fill="none" stroke="white" strokeWidth={1.5} opacity={0.9} />
+          <path d={`M ${left} ${cy2 - h * 0.37} A ${w * 0.38} ${h * 0.37} 0 0 1 ${left} ${cy2 + h * 0.37}`} fill="none" stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={left} y1={cy2 - h * 0.37} x2={left + kw} y2={cy2 - h * 0.37} stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={left} y1={cy2 + h * 0.37} x2={left + kw} y2={cy2 + h * 0.37} stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <rect x={left + w - kw} y={cy2 - kh / 2} width={kw} height={kh} fill="rgba(255,255,255,0.08)" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <path d={`M ${left + w - kw} ${cy2 - kh / 2} A ${kh / 2} ${kh / 2} 0 0 0 ${left + w - kw} ${cy2 + kh / 2}`} fill="none" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={left + w - bd} cy={cy2} r={3.5} fill="none" stroke="white" strokeWidth={1.5} opacity={0.9} />
+          <path d={`M ${left + w} ${cy2 - h * 0.37} A ${w * 0.38} ${h * 0.37} 0 0 0 ${left + w} ${cy2 + h * 0.37}`} fill="none" stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={left + w} y1={cy2 - h * 0.37} x2={left + w - kw} y2={cy2 - h * 0.37} stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={left + w} y1={cy2 + h * 0.37} x2={left + w - kw} y2={cy2 + h * 0.37} stroke="white" strokeWidth={1.5} opacity={0.8} />
+        </g>
+      )
+    }
+    if (elId === 'tennis-court') {
+      const sm = w * 0.055
+      return (
+        <g style={s}>
+          <line x1={left} y1={cy2} x2={left + w} y2={cy2} stroke="white" strokeWidth={2} opacity={0.9} />
+          <line x1={cx2} y1={top + h * 0.12} x2={cx2} y2={top + h * 0.88} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + sm} y1={top + h * 0.35} x2={left + w - sm} y2={top + h * 0.35} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + sm} y1={top + h * 0.65} x2={left + w - sm} y2={top + h * 0.65} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + sm} y1={top} x2={left + sm} y2={top + h} stroke="white" strokeWidth={1} opacity={0.6} />
+          <line x1={left + w - sm} y1={top} x2={left + w - sm} y2={top + h} stroke="white" strokeWidth={1} opacity={0.6} />
+        </g>
+      )
+    }
+    if (elId === 'pickleball-court') {
+      return (
+        <g style={s}>
+          <line x1={left} y1={cy2} x2={left + w} y2={cy2} stroke="white" strokeWidth={2} opacity={0.9} />
+          <line x1={left} y1={cy2 - h * 0.23} x2={left + w} y2={cy2 - h * 0.23} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left} y1={cy2 + h * 0.23} x2={left + w} y2={cy2 + h * 0.23} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={cx2} y1={top + h * 0.08} x2={cx2} y2={cy2 - h * 0.23} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={cx2} y1={cy2 + h * 0.23} x2={cx2} y2={top + h * 0.92} stroke="white" strokeWidth={1.5} opacity={0.85} />
+        </g>
+      )
+    }
+    if (elId === 'volleyball-court') {
+      return (
+        <g style={s}>
+          <line x1={left} y1={cy2} x2={left + w} y2={cy2} stroke="white" strokeWidth={2.5} opacity={0.9} />
+          <line x1={left} y1={cy2 - h * 0.28} x2={left + w} y2={cy2 - h * 0.28} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
+          <line x1={left} y1={cy2 + h * 0.28} x2={left + w} y2={cy2 + h * 0.28} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
+        </g>
+      )
+    }
+    if (elId === 'bocce-court') {
+      return (
+        <g style={s}>
+          <line x1={left + w * 0.13} y1={top} x2={left + w * 0.13} y2={top + h} stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={left + w * 0.87} y1={top} x2={left + w * 0.87} y2={top + h} stroke="white" strokeWidth={1.5} opacity={0.8} />
+          <line x1={cx2} y1={top} x2={cx2} y2={top + h} stroke="white" strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />
+          <circle cx={cx2} cy={cy2} r={Math.min(w, h) * 0.15} fill="none" stroke="white" strokeWidth={1} opacity={0.5} />
+        </g>
+      )
+    }
+    if (elId === 'baseball-diamond') {
+      const hx = cx2, hy = top + h * 0.85
+      const bd2 = Math.min(w, h) * 0.38
+      const bs = Math.min(w, h) * 0.055
+      return (
+        <g style={s}>
+          <line x1={hx} y1={hy} x2={left + w * 0.05} y2={top + h * 0.05} stroke="white" strokeWidth={1} opacity={0.55} />
+          <line x1={hx} y1={hy} x2={left + w * 0.95} y2={top + h * 0.05} stroke="white" strokeWidth={1} opacity={0.55} />
+          <polygon points={`${hx},${hy} ${hx - bd2},${hy - bd2} ${hx},${hy - bd2 * 1.5} ${hx + bd2},${hy - bd2}`}
+            fill="rgba(255,255,255,0.07)" stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <circle cx={hx} cy={hy - bd2 * 0.82} r={Math.min(w, h) * 0.045} fill="none" stroke="white" strokeWidth={1} opacity={0.6} />
+          <rect x={hx - bs / 2} y={hy - bs / 2} width={bs} height={bs} fill="white" opacity={0.9} />
+          <rect x={hx - bd2 - bs / 2} y={hy - bd2 - bs / 2} width={bs} height={bs} fill="white" opacity={0.9} />
+          <rect x={hx - bs / 2} y={hy - bd2 * 1.5 - bs / 2} width={bs} height={bs} fill="white" opacity={0.9} />
+          <rect x={hx + bd2 - bs / 2} y={hy - bd2 - bs / 2} width={bs} height={bs} fill="white" opacity={0.9} />
+        </g>
+      )
+    }
+    if (elId === 'pool') {
+      return (
+        <g style={s}>
+          {Array.from({ length: 7 }).map((_, i) => (
+            <line key={i} x1={left} y1={top + (h / 8) * (i + 1)} x2={left + w} y2={top + (h / 8) * (i + 1)}
+              stroke="rgba(255,255,255,0.65)" strokeWidth={1.5} />
+          ))}
+          <line x1={left + w * 0.12} y1={top} x2={left + w * 0.12} y2={top + h} stroke="rgba(255,255,255,0.3)" strokeWidth={1} strokeDasharray="4 4" />
+          <line x1={left + w * 0.88} y1={top} x2={left + w * 0.88} y2={top + h} stroke="rgba(255,255,255,0.3)" strokeWidth={1} strokeDasharray="4 4" />
+        </g>
+      )
+    }
+    if (elId === 'running-track') {
+      const rx2 = w * 0.44, ry2 = h * 0.42
+      return (
+        <g style={s}>
+          <ellipse cx={cx2} cy={cy2} rx={rx2 * 0.72} ry={ry2 * 0.72} fill="none" stroke="white" strokeWidth={1.5} opacity={0.8} />
+          {[0.78, 0.84, 0.9, 0.96].map((r, i) => (
+            <ellipse key={i} cx={cx2} cy={cy2} rx={rx2 * r} ry={ry2 * r} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+          ))}
+          <line x1={cx2} y1={top + h * 0.04} x2={cx2} y2={top + h * 0.1} stroke="white" strokeWidth={2.5} opacity={0.9} />
+        </g>
+      )
+    }
+    return null
+  }
+
   const map = mapRef.current
   const visibleFeatures = map
     ? features.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
@@ -2017,22 +2162,79 @@ export function Canvas() {
       // ── Corridor rendering for street-section elements ──
       if (f.properties.category === 'streets' && isLine) {
         const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === f.properties.elementType)
-        const rowWidthFt = (el?.defaultProps as { rowWidth?: number })?.rowWidth ?? 30
+        const defaultRow = (el?.defaultProps as { rowWidth?: number })?.rowWidth ?? 30
+        const lanesWidth = f.properties.streetLanes
+          ? f.properties.streetLanes.reduce((s, l) => s + l.width, 0)
+          : defaultRow
         const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
         const avgLat = coords.reduce((s, c) => s + (c as [number,number])[1], 0) / coords.length
-        const corrPx = Math.max(4, feetToPixels(map, rowWidthFt, avgLat))
+        const corrPx = Math.max(4, feetToPixels(map, lanesWidth, avgLat))
         const roadColor = style.strokeColor ?? '#374151'
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
             {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={corrPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
-            {/* Curb edge */}
             <path d={path} fill="none" stroke="#111827" strokeWidth={corrPx} strokeLinecap="butt" strokeLinejoin="round" />
-            {/* Road surface */}
             <path d={path} fill="none" stroke={roadColor} strokeWidth={corrPx - 3} strokeLinecap="butt" strokeLinejoin="round" />
-            {/* Centerline */}
             <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeLinecap="round" strokeDasharray="8 6" />
           </g>
         )
+      }
+
+      // ── Sports field markings ──
+      if (f.properties.category === 'parks' && !isLine && f.geometry.type === 'Polygon') {
+        const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
+        if (coords.length >= 4) {
+          const pts = coords.slice(0, 4).map(c => lngLatToScreen(map, c))
+          const left = Math.min(pts[0][0], pts[3][0])
+          const right = Math.max(pts[1][0], pts[2][0])
+          const top = Math.min(pts[2][1], pts[3][1])
+          const bottom = Math.max(pts[0][1], pts[1][1])
+          const w = right - left, h = bottom - top
+          const cx2 = left + w / 2, cy2 = top + h / 2
+          const markings = renderSportsMarkings(f.properties.elementType, left, top, w, h, cx2, cy2)
+          const fillC = style.fillColor ?? '#22C55E'
+          const fillO = (style.fillOpacity ?? 80) / 100
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <path d={path} fill={fillC} fillOpacity={fillO} />
+              {markings}
+              <path d={path} fill="none" stroke={strokeColor} strokeWidth={isSelected ? sw + 1.5 : sw} />
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
+            </g>
+          )
+        }
+      }
+
+      // ── Building rendering ──
+      if (f.properties.category === 'buildings' && !isLine && f.geometry.type === 'Polygon') {
+        const fillC = style.fillColor ?? '#334155'
+        const fillO = (style.fillOpacity ?? 100) / 100
+        const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
+        if (coords.length >= 4) {
+          const pts = coords.slice(0, 4).map(c => lngLatToScreen(map, c))
+          const left = Math.min(pts[0][0], pts[3][0])
+          const right = Math.max(pts[1][0], pts[2][0])
+          const top2 = Math.min(pts[2][1], pts[3][1])
+          const bottom2 = Math.max(pts[0][1], pts[1][1])
+          const bw = right - left, bh = bottom2 - top2
+          const margin = Math.min(bw, bh) * 0.08
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              {/* Drop shadow */}
+              <path d={path} fill="rgba(0,0,0,0.18)" transform="translate(2,3)" />
+              {/* Building fill */}
+              <path d={path} fill={fillC} fillOpacity={fillO} />
+              {/* Roof/inner lighter area */}
+              {bw > 12 && bh > 12 && (
+                <rect x={left + margin} y={top2 + margin} width={bw - margin * 2} height={bh - margin * 2}
+                  fill="white" fillOpacity={0.07} rx={1} />
+              )}
+              {/* Stroke */}
+              <path d={path} fill="none" stroke={strokeColor} strokeWidth={isSelected ? sw + 1.5 : sw} />
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
+            </g>
+          )
+        }
       }
 
       // ── Building/polygon shadow ──
