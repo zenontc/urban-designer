@@ -3,14 +3,15 @@ import { Icon } from '../components/Icon'
 import { useLayersStore } from '../../store/layersStore'
 import { useUIStore } from '../../store/uiStore'
 import { useCanvasStore } from '../../store/canvasStore'
+import type { OrderItem } from '../../store/layersStore'
 
 export function LayersZone() {
   const {
     order, groups, layers, selectedId, setSelectedId,
     toggleVisible, toggleLocked, toggleGroupCollapse,
-    renameLayer, deleteLayer,
+    renameLayer, deleteLayer, reorder,
   } = useLayersStore()
-  const { setSelectedIds, selectedIds, deleteFeatures, features } = useCanvasStore()
+  const { setSelectedIds, selectedIds, deleteFeatures, features, reorderFeatures } = useCanvasStore()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
 
@@ -32,6 +33,27 @@ export function LayersZone() {
     deleteLayer(layerId)
     if (elementId) deleteFeatures([elementId])
     if (selectedId === layerId) setSelectedId(null)
+  }
+
+  function moveLayer(layerId: string, dir: 1 | -1) {
+    const layerItems = order.filter((o): o is OrderItem & { kind: 'layer' } => o.kind === 'layer')
+    const idx = layerItems.findIndex(o => o.id === layerId)
+    const newIdx = idx + dir
+    if (newIdx < 0 || newIdx >= layerItems.length) return
+
+    // Swap in the full order array
+    const fullIdxA = order.findIndex(o => o.kind === 'layer' && o.id === layerItems[idx].id)
+    const fullIdxB = order.findIndex(o => o.kind === 'layer' && o.id === layerItems[newIdx].id)
+    const newOrder = [...order]
+    ;[newOrder[fullIdxA], newOrder[fullIdxB]] = [newOrder[fullIdxB], newOrder[fullIdxA]]
+    reorder(newOrder)
+
+    // Sync canvas feature z-order: layers at bottom of panel = lower z-index = earlier in features array
+    const newLayerItems = newOrder.filter((o): o is OrderItem & { kind: 'layer' } => o.kind === 'layer')
+    const featureIds = newLayerItems
+      .map(o => layers.find(l => l.id === o.id)?.elementId)
+      .filter((id): id is string => !!id)
+    reorderFeatures(featureIds)
   }
 
   function startRename(id: string, current: string) {
@@ -123,6 +145,17 @@ export function LayersZone() {
                     {layer.label}
                   </span>
                 )}
+
+                <button style={{ ...iconBtn }}
+                  onClick={e => { e.stopPropagation(); moveLayer(item.id, -1) }}
+                  title="Move up">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><polyline points="2,7 5,3 8,7" /></svg>
+                </button>
+                <button style={{ ...iconBtn }}
+                  onClick={e => { e.stopPropagation(); moveLayer(item.id, 1) }}
+                  title="Move down">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><polyline points="2,3 5,7 8,3" /></svg>
+                </button>
 
                 <button style={{ ...iconBtn, opacity: layer.visible ? 1 : 0.4 }}
                   onClick={e => { e.stopPropagation(); toggleVisible(item.id) }}

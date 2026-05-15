@@ -196,6 +196,27 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
     ]
   },
   {
+    id: 'parks', label: 'Parks & Recreation', icon: 'tree', color: '#16A34A',
+    elements: [
+      { id: 'soccer-field', label: 'Soccer / Football Field', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#22C55E', fillOpacity: 80, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'basketball-court', label: 'Basketball Court', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#D97706', fillOpacity: 85, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'tennis-court', label: 'Tennis Court', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#2563EB', fillOpacity: 80, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'pickleball-court', label: 'Pickleball Court', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#7C3AED', fillOpacity: 80, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'baseball-diamond', label: 'Baseball Diamond', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#D97706', fillOpacity: 70, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'running-track', label: 'Running Track', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#DC2626', fillOpacity: 70, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'pool', label: 'Swimming Pool', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#0EA5E9', fillOpacity: 85, strokeColor: '#BFDBFE', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'splash-pad', label: 'Splash Pad / Water Play', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#38BDF8', fillOpacity: 70 }, defaultProps: {} },
+      { id: 'skate-park', label: 'Skate Park', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#374151', fillOpacity: 90 }, defaultProps: {} },
+      { id: 'dog-park', label: 'Dog Park', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#A3E635', fillOpacity: 70, strokeColor: '#65A30D', strokeWidth: 2 }, defaultProps: {} },
+      { id: 'playground-area', label: 'Playground Area', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#FCD34D', fillOpacity: 70 }, defaultProps: {} },
+      { id: 'bocce-court', label: 'Bocce / Pétanque Court', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#D97706', fillOpacity: 60, strokeColor: '#92400E', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'volleyball-court', label: 'Volleyball Court', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#FDE68A', fillOpacity: 70, strokeColor: '#FFFFFF', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'community-garden', label: 'Community Garden', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#86EFAC', fillOpacity: 80, strokeColor: '#16A34A', strokeWidth: 1 }, defaultProps: {} },
+      { id: 'amphitheater', label: 'Amphitheater / Bandshell', category: 'parks', drawMode: 'polygon', defaultStyle: { fillColor: '#CBD5E1', fillOpacity: 80 }, defaultProps: {} },
+      { id: 'picnic-shelter', label: 'Picnic Shelter / Pavilion', category: 'parks', drawMode: 'rect', defaultStyle: { fillColor: '#D97706', fillOpacity: 60, strokeColor: '#92400E', strokeWidth: 1 }, defaultProps: {} },
+    ]
+  },
+  {
     id: 'actors', label: 'Actors', icon: 'person', color: '#F97316',
     elements: [
       { id: 'car', label: 'Automobile', category: 'actors', drawMode: 'place', defaultStyle: { fillColor: '#3B82F6' }, defaultProps: {} },

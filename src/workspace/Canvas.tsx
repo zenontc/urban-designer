@@ -443,7 +443,7 @@ export function Canvas() {
     setCanvasSearchQuery, toggleCanvasSearch,
   } = useUIStore()
   const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds, bringToFront, sendToBack } = useCanvasStore()
-  const { layers, groups, addLayer } = useLayersStore()
+  const { layers, groups, addLayer, addGroup, moveLayerToGroup } = useLayersStore()
 
   function addFeatureWithLayer(feature: Parameters<typeof addFeature>[0]) {
     addFeature(feature)
@@ -564,6 +564,41 @@ export function Canvas() {
       if (map.getLayer('3d-buildings')) map.removeLayer('3d-buildings')
     }
   }, [mode3D])
+
+  // ── User-drawn 3D extrusions ─────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !styleLoadedRef.current) return
+    const extrudable = features.filter(f =>
+      f.geometry.type === 'Polygon' && (f.properties.style?.extrudeHeight ?? 0) > 0
+    )
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: extrudable.map(f => ({
+        ...f,
+        properties: {
+          height: f.properties.style.extrudeHeight ?? 10,
+          color: f.properties.style.fillColor ?? '#6366F1',
+        },
+      })),
+    }
+    try {
+      if (map.getSource('ump-extrude')) {
+        (map.getSource('ump-extrude') as mapboxgl.GeoJSONSource).setData(geojson)
+      } else {
+        map.addSource('ump-extrude', { type: 'geojson', data: geojson })
+        map.addLayer({
+          id: 'ump-extrude-fill', type: 'fill-extrusion', source: 'ump-extrude',
+          paint: {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0.8,
+          },
+        })
+      }
+    } catch { /* style not ready */ }
+  }, [features])
 
   // ── Pan/zoom control per tool ─────────────────────────────────────────────
   useEffect(() => {
@@ -1503,6 +1538,16 @@ export function Canvas() {
     setContextMenu(null)
   }
 
+  function groupSelected() {
+    const selIds = selectedIdsRef.current
+    if (selIds.length < 2) return
+    const newGroupId = 'grp_' + Date.now()
+    addGroup('Group', newGroupId)
+    const selLayers = layers.filter(l => selIds.includes(l.elementId))
+    selLayers.forEach(l => moveLayerToGroup(l.id, newGroupId))
+    setContextMenu(null)
+  }
+
   function applyExtrude(height: number) {
     if (!selectedIds[0]) return
     const f = features.find(x => x.properties.id === selectedIds[0])
@@ -1625,6 +1670,109 @@ export function Canvas() {
       )
     }
 
+    // Signs (markings category)
+    if (cat === 'markings') {
+      if (elId === 'stop-sign') {
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <polygon points="0,-12 8.5,-8.5 12,0 8.5,8.5 0,12 -8.5,8.5 -12,0 -8.5,-8.5"
+              fill="#DC2626" stroke="white" strokeWidth={1.5} />
+            <text x={0} y={1} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={5} fontWeight="bold" style={{ userSelect: 'none' }}>STOP</text>
+            {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+      if (elId === 'yield-sign') {
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <polygon points="0,12 -11,-6 11,-6" fill="#DC2626" stroke="white" strokeWidth={1.5} />
+            <polygon points="0,8 -7,-3 7,-3" fill="none" stroke="white" strokeWidth={1} />
+            {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+      if (elId === 'speed-sign') {
+        const speed = (f.properties as unknown as { speed?: number }).speed ?? 25
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-9} y={-13} width={18} height={26} rx={2} fill="white" stroke="#1F2937" strokeWidth={1.5} />
+            <text x={0} y={-6} textAnchor="middle" dominantBaseline="middle" fill="#1F2937" fontSize={4} fontWeight="bold" style={{ userSelect: 'none' }}>SPEED</text>
+            <text x={0} y={-2} textAnchor="middle" dominantBaseline="middle" fill="#1F2937" fontSize={3.5} style={{ userSelect: 'none' }}>LIMIT</text>
+            <text x={0} y={6} textAnchor="middle" dominantBaseline="middle" fill="#1F2937" fontSize={9} fontWeight="bold" style={{ userSelect: 'none' }}>{speed}</text>
+            {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+      if (elId === 'street-name-sign') {
+        const lbl = f.properties.label.slice(0, 10)
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-20} y={-8} width={40} height={16} rx={2} fill="#16A34A" stroke="#14532D" strokeWidth={1} />
+            <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={6} fontWeight="bold" style={{ userSelect: 'none' }}>{lbl}</text>
+            {isSelected && <circle cx={0} cy={0} r={24} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+      if (elId === 'wayfinding-sign') {
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-14} y={-9} width={28} height={14} rx={2} fill="#2563EB" stroke="#1D4ED8" strokeWidth={1} />
+            <polygon points="14,-2 20,2 14,6" fill="#2563EB" stroke="#1D4ED8" strokeWidth={1} />
+            <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={5} fontWeight="bold" style={{ userSelect: 'none' }}>INFO</text>
+            {isSelected && <circle cx={0} cy={0} r={24} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          </g>
+        )
+      }
+    }
+
+    // Furniture: bench
+    if (elId === 'bench') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <rect x={-10} y={-4} width={20} height={5} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw} />
+          <rect x={-10} y={-9} width={20} height={5} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw * 0.7} opacity={0.6} />
+          <line x1={-7} y1={1} x2={-7} y2={4} stroke={strokeColor} strokeWidth={1.5} strokeLinecap="round" />
+          <line x1={7} y1={1} x2={7} y2={4} stroke={strokeColor} strokeWidth={1.5} strokeLinecap="round" />
+          {isSelected && <circle cx={0} cy={-2} r={14} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Furniture: bike rack
+    if (elId === 'bike-rack') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <rect x={-9} y={-2} width={18} height={4} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw} />
+          <line x1={-5} y1={-7} x2={-5} y2={7} stroke={strokeColor} strokeWidth={1.5} strokeLinecap="round" />
+          <line x1={5} y1={-7} x2={5} y2={7} stroke={strokeColor} strokeWidth={1.5} strokeLinecap="round" />
+          {isSelected && <circle cx={0} cy={0} r={13} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Furniture: planter
+    if (elId === 'planter') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <rect x={-8} y={-4} width={16} height={10} rx={2} fill="#92400E" stroke="#78350F" strokeWidth={sw} />
+          <ellipse cx={0} cy={-4} rx={8} ry={4} fill="#22C55E" stroke="#15803D" strokeWidth={sw * 0.7} />
+          {isSelected && <circle cx={0} cy={0} r={14} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Furniture: picnic table
+    if (elId === 'picnic-table') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <rect x={-10} y={-3} width={20} height={6} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw} />
+          <rect x={-14} y={0} width={6} height={3} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw * 0.7} opacity={0.8} />
+          <rect x={8} y={0} width={6} height={3} rx={1} fill={fill} stroke={strokeColor} strokeWidth={sw * 0.7} opacity={0.8} />
+          {isSelected && <circle cx={0} cy={0} r={18} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
     // Default: colored circle
     return (
       <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
@@ -1694,6 +1842,48 @@ export function Canvas() {
             })}
           </g>
         )
+      }
+
+      // ── Double yellow centerline ──
+      if (f.properties.elementType === 'dbl-yellow' && isLine) {
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 8} strokeOpacity={0.35} />}
+            <path d={path} fill="none" stroke="#FBBF24" strokeWidth={sw + 2} />
+            <path d={path} fill="none" stroke="#1F2937" strokeWidth={1.5} />
+            <path d={path} fill="none" stroke="#FBBF24" strokeWidth={sw - 0.5} strokeDasharray="none" />
+          </g>
+        )
+      }
+
+      // ── Parking space layout ──
+      if ((f.properties.elementType === 'parallel-parking' || f.properties.elementType === 'head-in-parking' || f.properties.elementType === 'diagonal-parking') && f.geometry.type === 'Polygon') {
+        const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
+        if (coords.length >= 4) {
+          const pts = coords.slice(0, -1).map(c => lngLatToScreen(map, c as [number, number]))
+          const w = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+          const ang = Math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])
+          const spaceW = Math.max(20, w / Math.round(w / 30))
+          const numSpaces = Math.max(1, Math.round(w / spaceW))
+          const lines: React.ReactNode[] = []
+          for (let i = 0; i <= numSpaces; i++) {
+            const dx = i * spaceW * Math.cos(ang)
+            const dy = i * spaceW * Math.sin(ang)
+            const h = Math.hypot(pts[3][0] - pts[0][0], pts[3][1] - pts[0][1])
+            const perpAng = Math.atan2(pts[3][1] - pts[0][1], pts[3][0] - pts[0][0])
+            lines.push(<line key={i}
+              x1={pts[0][0] + dx} y1={pts[0][1] + dy}
+              x2={pts[0][0] + dx + h * Math.cos(perpAng)} y2={pts[0][1] + dy + h * Math.sin(perpAng)}
+              stroke="white" strokeWidth={1.5} opacity={0.9} />)
+          }
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <path d={path} fill={style.fillColor ?? '#CBD5E1'} fillOpacity={(style.fillOpacity ?? 70) / 100} />
+              {lines}
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={2} strokeOpacity={0.7} />}
+            </g>
+          )
+        }
       }
 
       // ── Crosswalk rendering ──
@@ -2279,6 +2469,7 @@ export function Canvas() {
             { label: 'Duplicate', action: () => duplicateSelected() },
             { label: 'Bring to Front', action: () => { bringToFront(contextMenu.featureId); setContextMenu(null) } },
             { label: 'Send to Back',  action: () => { sendToBack(contextMenu.featureId);  setContextMenu(null) } },
+            ...(selectedIds.length > 1 ? [null, { label: `Group ${selectedIds.length} Features`, action: () => groupSelected() }] : []),
             null,
             { label: 'Delete', action: () => { deleteFeatures([contextMenu.featureId]); setContextMenu(null) }, danger: true },
           ] as Array<{ label: string; action: () => void; danger?: boolean } | null>).map((item, i) =>

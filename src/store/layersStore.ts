@@ -33,7 +33,8 @@ interface LayersState {
   toggleMetrics: (id: string) => void
   deleteLayer: (id: string) => void
   deleteGroup: (id: string) => void
-  addGroup: (label: string) => void
+  addGroup: (label: string, id?: string) => void
+  moveLayerToGroup: (layerId: string, groupId: string) => void
   reorder: (order: OrderItem[]) => void
   renameLayer: (id: string, label: string) => void
   renameGroup: (id: string, label: string) => void
@@ -55,12 +56,15 @@ export const useLayersStore = create<LayersState>((set) => ({
   toggleMetrics: (id) => set((s) => ({ layers: s.layers.map(l => l.id === id ? { ...l, inMetrics: !l.inMetrics } : l) })),
   deleteLayer: (id) => set((s) => ({ layers: s.layers.filter(l => l.id !== id), order: s.order.filter(o => !(o.kind === 'layer' && o.id === id)) })),
   deleteGroup: (id) => set((s) => ({ groups: s.groups.filter(g => g.id !== id), order: s.order.filter(o => !(o.kind === 'group' && o.id === id)) })),
-  addGroup: (label) => set((s) => {
-    const id = 'grp_' + Date.now()
+  addGroup: (label, id) => set((s) => {
+    const newId = id ?? 'grp_' + Date.now()
     const palette = ['#7C3AED', '#DB2777', '#0891B2', '#BE185D', '#0E7490', '#65A30D']
-    const newGroup: LayerGroup = { id, label, color: palette[s.groups.length % palette.length], collapsed: false }
-    return { groups: [...s.groups, newGroup], order: [...s.order, { kind: 'group', id }] }
+    const newGroup: LayerGroup = { id: newId, label, color: palette[s.groups.length % palette.length], collapsed: false }
+    return { groups: [...s.groups, newGroup], order: [...s.order, { kind: 'group', id: newId }] }
   }),
+  moveLayerToGroup: (layerId, groupId) => set((s) => ({
+    layers: s.layers.map(l => l.id === layerId ? { ...l, groupId } : l),
+  })),
   reorder: (order) => set({ order }),
   renameLayer: (id, label) => set((s) => ({ layers: s.layers.map(l => l.id === id ? { ...l, label } : l) })),
   renameGroup: (id, label) => set((s) => ({ groups: s.groups.map(g => g.id === id ? { ...g, label } : g) })),

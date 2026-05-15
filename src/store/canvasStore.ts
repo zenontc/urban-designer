@@ -23,6 +23,7 @@ interface CanvasState {
   sendToBack: (id: string) => void
   undo: () => void
   redo: () => void
+  reorderFeatures: (ids: string[]) => void
   canUndo: () => boolean
   canRedo: () => boolean
 }
@@ -167,6 +168,16 @@ export const useCanvasStore = create<CanvasState>()(
           if (s.historyIndex >= s.history.length - 1) return s
           const historyIndex = s.historyIndex + 1
           return { features: s.history[historyIndex], historyIndex }
+        }),
+
+      reorderFeatures: (ids) =>
+        set((s) => {
+          const idSet = new Set(ids)
+          const mapped = new Map(s.features.map(f => [f.properties.id, f]))
+          const rest = s.features.filter(f => !idSet.has(f.properties.id))
+          const reordered = ids.map(id => mapped.get(id)).filter(Boolean) as typeof s.features
+          const next = [...rest, ...reordered]
+          return { features: next, ...pushHistory(s.history, s.historyIndex, next) }
         }),
 
       canUndo: () => get().historyIndex > 0,
