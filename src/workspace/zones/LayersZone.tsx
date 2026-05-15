@@ -79,7 +79,7 @@ export function LayersZone() {
     const featureIds = newLayerItems
       .map(o => layers.find(l => l.id === o.id)?.elementId)
       .filter((id): id is string => !!id)
-    reorderFeatures(featureIds)
+    reorderFeatures([...featureIds].reverse())
   }
 
   // Drag-and-drop reordering
@@ -131,7 +131,7 @@ export function LayersZone() {
     const featureIds = newLayerItems
       .map(o => layers.find(l => l.id === o.id)?.elementId)
       .filter((id): id is string => !!id)
-    reorderFeatures(featureIds)
+    reorderFeatures([...featureIds].reverse())
 
     dragLayerId.current = null
     dragOverLayerId.current = null

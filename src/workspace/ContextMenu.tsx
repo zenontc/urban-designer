@@ -48,11 +48,6 @@ export function ContextMenu({ x, y, featureId, onClose }: ContextMenuProps) {
     onClose()
   }
 
-  function selectAll() {
-    setSelectedIds(features.map(f => f.properties.id))
-    onClose()
-  }
-
   function viewDetails() {
     if (feature) setActiveElementType(feature.properties.elementType)
     onClose()
@@ -92,11 +87,8 @@ export function ContextMenu({ x, y, featureId, onClose }: ContextMenuProps) {
           {item('sliders', 'Edit Style', onClose)}
           <div style={sep} />
           {item('trash', 'Delete', remove, true)}
-          <div style={sep} />
         </>
       )}
-      {item('select', 'Select All', selectAll)}
-      {item('x', 'Deselect All', () => { setSelectedIds([]); onClose() })}
     </div>
   )
 }

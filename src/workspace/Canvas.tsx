@@ -501,6 +501,7 @@ export function Canvas() {
       antialias: true,
       fadeDuration: 0,
       preserveDrawingBuffer: true,
+      dragRotate: false,
     })
 
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -548,7 +549,11 @@ export function Canvas() {
     const map = mapRef.current
     if (!map || !styleLoadedRef.current) return
     if (mode3D) {
-      map.easeTo({ pitch: 45, duration: 600 })
+      map.easeTo({ pitch: 55, duration: 600 })
+      // Narrow FOV ≈ parallel/isometric projection
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(map as any).transform.fov = 2
+      map.triggerRepaint()
       if (!map.getLayer('3d-buildings'))
         map.addLayer({
           id: '3d-buildings', source: 'composite', 'source-layer': 'building',
@@ -561,6 +566,10 @@ export function Canvas() {
         })
     } else {
       map.easeTo({ pitch: 0, duration: 600 })
+      // Restore default FOV (~36°)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(map as any).transform.fov = 36.87
+      map.triggerRepaint()
       if (map.getLayer('3d-buildings')) map.removeLayer('3d-buildings')
     }
   }, [mode3D])
@@ -2184,20 +2193,22 @@ export function Canvas() {
       if (f.properties.category === 'parks' && !isLine && f.geometry.type === 'Polygon') {
         const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
         if (coords.length >= 4) {
-          const pts = coords.slice(0, 4).map(c => lngLatToScreen(map, c))
-          const left = Math.min(pts[0][0], pts[3][0])
-          const right = Math.max(pts[1][0], pts[2][0])
-          const top = Math.min(pts[2][1], pts[3][1])
-          const bottom = Math.max(pts[0][1], pts[1][1])
-          const w = right - left, h = bottom - top
-          const cx2 = left + w / 2, cy2 = top + h / 2
-          const markings = renderSportsMarkings(f.properties.elementType, left, top, w, h, cx2, cy2)
+          const p0 = lngLatToScreen(map, coords[0])
+          const p1 = lngLatToScreen(map, coords[1])
+          const p3 = lngLatToScreen(map, coords[3])
+          const fw = Math.max(1, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]))
+          const fh = Math.max(1, Math.hypot(p3[0] - p0[0], p3[1] - p0[1]))
+          // Affine transform: local (0,0)→p0, (fw,0)→p1, (0,fh)→p3
+          const ma = (p1[0] - p0[0]) / fw, mb = (p1[1] - p0[1]) / fw
+          const mc = (p3[0] - p0[0]) / fh, md = (p3[1] - p0[1]) / fh
+          const matStr = `matrix(${ma},${mb},${mc},${md},${p0[0]},${p0[1]})`
+          const markings = renderSportsMarkings(f.properties.elementType, 0, 0, fw, fh, fw / 2, fh / 2)
           const fillC = style.fillColor ?? '#22C55E'
           const fillO = (style.fillOpacity ?? 80) / 100
           return (
             <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
               <path d={path} fill={fillC} fillOpacity={fillO} />
-              {markings}
+              {markings && <g transform={matStr}>{markings}</g>}
               <path d={path} fill="none" stroke={strokeColor} strokeWidth={isSelected ? sw + 1.5 : sw} />
               {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
             </g>
@@ -2573,17 +2584,15 @@ export function Canvas() {
           <g id="place-preview-layer">{renderPlacePreview()}</g>
           <g id="selection-layer">{renderSelection()}</g>
 
-          {/* Rotate cursor hint — Illustrator style, white with dark outline */}
+          {/* Rotate cursor — Illustrator/Photoshop style circular arrow */}
           {hoveredRotHandle && cursorPos && (
-            <g transform={`translate(${cursorPos[0] + 12},${cursorPos[1] - 12})`} style={{ pointerEvents: 'none' }}>
-              {/* Dark outline for visibility */}
-              <path d="M2,13 A11,11,0,0,1,13,2" fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="4.5" strokeLinecap="round"/>
-              <path d="M2,13 L-3,9 M2,13 L7,10" stroke="rgba(0,0,0,0.6)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M13,2 L16,-2 M13,2 L9,-1" stroke="rgba(0,0,0,0.6)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <g transform={`translate(${cursorPos[0] + 16},${cursorPos[1] - 16})`} style={{ pointerEvents: 'none' }}>
+              {/* Dark outline */}
+              <path d="M0,-10 A10,10,0,1,1,-10,0" fill="none" stroke="rgba(0,0,0,0.75)" strokeWidth="4" strokeLinecap="round"/>
+              <path d="M-7,-3 L-10,0 L-13,-3" fill="none" stroke="rgba(0,0,0,0.75)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
               {/* White icon */}
-              <path d="M2,13 A11,11,0,0,1,13,2" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-              <path d="M2,13 L-3,9 M2,13 L7,10" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M13,2 L16,-2 M13,2 L9,-1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M0,-10 A10,10,0,1,1,-10,0" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+              <path d="M-7,-3 L-10,0 L-13,-3" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </g>
           )}
           <g id="measure-layer">{renderMeasure()}</g>

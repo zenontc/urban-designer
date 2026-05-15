@@ -10,35 +10,86 @@ export interface StreetLane {
   icon: string
 }
 
-const DEFAULT_LANES: StreetLane[] = [
-  { id: '1',  label: 'Building Setback', width: 10, color: '#F1F5F9', icon: '🏠' },
-  { id: '2',  label: 'Sidewalk',          width: 12, color: '#E2E8F0', icon: '🚶' },
-  { id: '3',  label: 'Tree Buffer',       width: 6,  color: '#DCFCE7', icon: '🌳' },
-  { id: '4',  label: 'Bike Lane',         width: 6,  color: '#FEF9C3', icon: '🚲' },
-  { id: '5',  label: 'Travel Lane',       width: 12, color: '#CBD5E1', icon: '🚗' },
-  { id: '6',  label: 'Center Turn',       width: 10, color: '#DDD6FE', icon: '↔'  },
-  { id: '7',  label: 'Travel Lane',       width: 12, color: '#CBD5E1', icon: '🚗' },
-  { id: '8',  label: 'Bike Lane',         width: 6,  color: '#FEF9C3', icon: '🚲' },
-  { id: '9',  label: 'Tree Buffer',       width: 6,  color: '#DCFCE7', icon: '🌳' },
-  { id: '10', label: 'Sidewalk',          width: 12, color: '#E2E8F0', icon: '🚶' },
-  { id: '11', label: 'Building Setback',  width: 10, color: '#F1F5F9', icon: '🏠' },
-]
+function makeLanes(specs: Array<[string, number, string, string]>): StreetLane[] {
+  return specs.map(([label, width, color, icon], i) => ({ id: String(i + 1), label, width, color, icon }))
+}
+
+const LANES_BY_TYPE: Record<string, StreetLane[]> = {
+  'alley': makeLanes([
+    ['Travel Lane', 16, '#CBD5E1', '🚗'],
+  ]),
+  'bike-lane': makeLanes([
+    ['Bike Lane', 8, '#FEF9C3', '🚲'],
+  ]),
+  'shared-path': makeLanes([
+    ['Shared Path', 12, '#DCFCE7', '🚶'],
+  ]),
+  'ped-street': makeLanes([
+    ['Sidewalk', 5, '#E2E8F0', '🚶'],
+    ['Pedestrian Zone', 20, '#F0FDF4', '🚶'],
+    ['Sidewalk', 5, '#E2E8F0', '🚶'],
+  ]),
+  'local-street': makeLanes([
+    ['Sidewalk', 7.5, '#E2E8F0', '🚶'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Center Turn', 6, '#DDD6FE', '↔'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Sidewalk', 7.5, '#E2E8F0', '🚶'],
+  ]),
+  'collector-street': makeLanes([
+    ['Sidewalk', 8, '#E2E8F0', '🚶'],
+    ['Parking', 8, '#F1F5F9', '🅿'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Center Turn', 12, '#DDD6FE', '↔'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Parking', 8, '#F1F5F9', '🅿'],
+  ]),
+  'arterial': makeLanes([
+    ['Sidewalk', 10, '#E2E8F0', '🚶'],
+    ['Bike Lane', 6, '#FEF9C3', '🚲'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Center Turn', 10, '#DDD6FE', '↔'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Bike Lane', 6, '#FEF9C3', '🚲'],
+    ['Sidewalk', 10, '#E2E8F0', '🚶'],
+  ]),
+  'highway': makeLanes([
+    ['Setback', 34, '#F1F5F9', '🏠'],
+    ['Shoulder', 12, '#94A3B8', '⚠'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Median', 36, '#DCFCE7', '🌳'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Travel Lane', 12, '#CBD5E1', '🚗'],
+    ['Shoulder', 12, '#94A3B8', '⚠'],
+    ['Setback', 34, '#F1F5F9', '🏠'],
+  ]),
+}
+
+const DEFAULT_LANES = LANES_BY_TYPE['arterial']
 
 interface CrossSectionInlineProps {
   feature: UMPFeature
   onUpdate: (lanes: StreetLane[]) => void
 }
 
+function defaultLanesForFeature(feature: UMPFeature): StreetLane[] {
+  if (feature.properties.streetLanes) return feature.properties.streetLanes
+  return LANES_BY_TYPE[feature.properties.elementType] ?? DEFAULT_LANES
+}
+
 export function CrossSectionInline({ feature, onUpdate }: CrossSectionInlineProps) {
-  const [lanes, setLanes] = useState<StreetLane[]>(() =>
-    feature.properties.streetLanes ?? DEFAULT_LANES
-  )
+  const [lanes, setLanes] = useState<StreetLane[]>(() => defaultLanesForFeature(feature))
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [units, setUnits] = useState<'ft' | 'm'>('ft')
 
   // Sync when feature changes (different street selected)
   useEffect(() => {
-    setLanes(feature.properties.streetLanes ?? DEFAULT_LANES)
+    setLanes(defaultLanesForFeature(feature))
     setSelectedId(null)
   }, [feature.properties.id])
 
