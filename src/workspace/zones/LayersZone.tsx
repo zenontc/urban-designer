@@ -15,6 +15,7 @@ export function LayersZone() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([])
+  const [search, setSearch] = useState('')
 
   // Drag state
   const dragLayerId = useRef<string | null>(null)
@@ -177,9 +178,19 @@ export function LayersZone() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      {/* Search */}
+      <div style={{ padding: '6px 8px 0', flexShrink: 0 }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search layers…"
+          style={{ width: '100%', height: 26, padding: '0 8px', fontSize: 11, borderRadius: 5, border: '1px solid var(--color-border)', background: 'var(--color-bg-elevated)', color: 'var(--color-text)', outline: 'none', boxSizing: 'border-box' }}
+        />
+      </div>
+
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>{layers.length} layers</span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flex: 1 }}>{search ? `${layers.filter(l => l.label.toLowerCase().includes(search.toLowerCase())).length} results` : `${layers.length} layers`}</span>
         {selectedLayerIds.length > 1 && (
           <span style={{ fontSize: 10, color: 'var(--color-text-muted)', marginRight: 4 }}>{selectedLayerIds.length} selected</span>
         )}
@@ -199,6 +210,10 @@ export function LayersZone() {
       {/* Layer tree */}
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {order.map(item => {
+          if (search && item.kind === 'layer') {
+            const layer = layers.find(l => l.id === item.id)
+            if (layer && !layer.label.toLowerCase().includes(search.toLowerCase())) return null
+          }
           if (item.kind === 'group') {
             const group = groups.find(g => g.id === item.id)
             if (!group) return null

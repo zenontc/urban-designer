@@ -348,6 +348,7 @@ export function Canvas() {
   const [mapError, setMapError] = useState<string | null>(null)
   const [showLabels, setShowLabels] = useState(true)
   const [mapStyle, setMapStyle] = useState<keyof typeof MAP_STYLES>('satellite')
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false)
 
   // Drawing state
   const [drawNodes, setDrawNodes] = useState<[number, number][]>([])
@@ -441,6 +442,7 @@ export function Canvas() {
     activeTool, setActiveTool, activeStyle, activeElementType, setActiveElementType,
     nightMode, mode3D, setMode3D, showCanvasSearch, canvasSearchQuery,
     setCanvasSearchQuery, toggleCanvasSearch, showShadowPanel, shadowAzimuth, shadowAltitude,
+    hiddenPhases, togglePhase, showFeatureLabels, toggleFeatureLabels,
   } = useUIStore()
   const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds, bringToFront, sendToBack } = useCanvasStore()
   const { layers, groups, addLayer, addGroup, moveLayerToGroup } = useLayersStore()
@@ -693,6 +695,9 @@ export function Canvas() {
           case 'delete':
           case 'backspace':
             if (selectedIdsRef.current.length) deleteFeatures(selectedIdsRef.current)
+            break
+          case '?':
+            setShowKeyboardHelp(v => !v)
             break
         }
       }
@@ -1994,7 +1999,10 @@ export function Canvas() {
 
   const map = mapRef.current
   const visibleFeatures = map
-    ? features.filter(f => !layers.find(l => l.id === f.properties.layerGroup && !l.visible))
+    ? features.filter(f =>
+        !layers.find(l => l.id === f.properties.layerGroup && !l.visible) &&
+        !hiddenPhases.includes(f.properties.phase)
+      )
     : []
 
   function renderFeatures() {
@@ -2295,6 +2303,40 @@ export function Canvas() {
     })
   }
 
+  function renderLabels() {
+    if (!map || !showFeatureLabels) return null
+    return visibleFeatures.map(f => {
+      const geom = f.geometry
+      let cx: number, cy: number
+      if (geom.type === 'Point') {
+        ;[cx, cy] = lngLatToScreen(map, geom.coordinates as [number, number])
+        cy -= 16
+      } else if (geom.type === 'LineString') {
+        const mid = geom.coordinates[Math.floor(geom.coordinates.length / 2)] as [number, number]
+        ;[cx, cy] = lngLatToScreen(map, mid)
+        cy -= 8
+      } else if (geom.type === 'Polygon') {
+        const ring = geom.coordinates[0] as [number, number][]
+        const avgLng = ring.reduce((s, c) => s + c[0], 0) / ring.length
+        const avgLat = ring.reduce((s, c) => s + c[1], 0) / ring.length
+        ;[cx, cy] = lngLatToScreen(map, [avgLng, avgLat])
+      } else {
+        return null
+      }
+      const label = f.properties.label
+      if (!label || label === f.properties.elementType) return null
+      const tw = label.length * 6.5 + 10
+      return (
+        <g key={`label-${f.properties.id}`} style={{ pointerEvents: 'none' }}>
+          <rect x={cx - tw / 2} y={cy - 9} width={tw} height={16} rx={3}
+            fill="rgba(0,0,0,0.55)" />
+          <text x={cx} y={cy + 3} textAnchor="middle" fontSize={10} fontFamily="Inter, sans-serif"
+            fill="white" fontWeight={500}>{label}</text>
+        </g>
+      )
+    })
+  }
+
   function renderPlacePreview() {
     if (!map || !cursorPos) return null
     const elType = activeElementType
@@ -2580,6 +2622,7 @@ export function Canvas() {
           width="100%" height="100%"
         >
           <g id="elements-layer">{renderFeatures()}</g>
+          <g id="labels-layer">{renderLabels()}</g>
           <g id="active-draw-layer">{renderActiveDraw()}</g>
           <g id="place-preview-layer">{renderPlacePreview()}</g>
           <g id="selection-layer">{renderSelection()}</g>
@@ -2761,6 +2804,46 @@ export function Canvas() {
         </div>
       )}
 
+      {/* Phase visibility + label toggle bar */}
+      <div style={{ position: 'absolute', bottom: 52, left: 12, zIndex: 20, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 8, padding: '4px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 2 }}>Phase</span>
+        {([
+          { id: 'existing', label: 'Exist', color: '#64748B' },
+          { id: 'phase-1',  label: 'Ph 1',  color: '#22C55E' },
+          { id: 'phase-2',  label: 'Ph 2',  color: '#F59E0B' },
+          { id: 'phase-3',  label: 'Ph 3',  color: '#EF4444' },
+        ] as const).map(ph => {
+          const hidden = hiddenPhases.includes(ph.id)
+          return (
+            <button key={ph.id} onClick={() => togglePhase(ph.id)} style={{
+              height: 22, padding: '0 7px', fontSize: 10, fontWeight: 600, borderRadius: 4,
+              border: `1px solid ${hidden ? 'var(--color-border)' : ph.color}`,
+              background: hidden ? 'transparent' : `${ph.color}22`,
+              color: hidden ? 'var(--color-text-muted)' : ph.color,
+              cursor: 'pointer', opacity: hidden ? 0.5 : 1, textDecoration: hidden ? 'line-through' : 'none',
+            }}>{ph.label}</button>
+          )
+        })}
+        <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 2px' }} />
+        <button
+          onClick={toggleFeatureLabels}
+          title={showFeatureLabels ? 'Hide feature labels' : 'Show feature labels'}
+          style={{ height: 22, padding: '0 7px', fontSize: 10, fontWeight: 600, borderRadius: 4,
+            border: `1px solid ${showFeatureLabels ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: showFeatureLabels ? 'var(--color-accent-subtle)' : 'transparent',
+            color: showFeatureLabels ? 'var(--color-accent)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+          }}>Labels</button>
+        <div style={{ width: 1, height: 16, background: 'var(--color-border)', margin: '0 2px' }} />
+        <button
+          onClick={() => setShowKeyboardHelp(v => !v)}
+          title="Keyboard shortcuts (?)"
+          style={{ height: 22, width: 22, fontSize: 11, fontWeight: 700, borderRadius: 4,
+            border: '1px solid var(--color-border)', background: 'transparent',
+            color: 'var(--color-text-muted)', cursor: 'pointer',
+          }}>?</button>
+      </div>
+
       {/* Context menu */}
       {contextMenu && (
         <div
@@ -2787,6 +2870,50 @@ export function Canvas() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >{item.label}</button>
           )}
+        </div>
+      )}
+
+      {/* Keyboard shortcuts help */}
+      {showKeyboardHelp && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowKeyboardHelp(false)}>
+          <div style={{ background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '20px 24px', maxWidth: 480, width: '90%', boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>Keyboard Shortcuts</span>
+              <button onClick={() => setShowKeyboardHelp(false)} style={{ width: 24, height: 24, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 18, lineHeight: 1 }}>×</button>
+            </div>
+            {([
+              ['Tools', [
+                ['V', 'Select'],['A', 'Direct Select'],['P', 'Pen / Bezier'],['L', 'Line'],
+                ['R', 'Rectangle'],['O', 'Ellipse'],['G', 'Polygon'],['T', 'Text'],
+                ['M', 'Measure'],['E', 'Extrude'],
+              ]],
+              ['Actions', [
+                ['⌘Z / ⌘⇧Z', 'Undo / Redo'],['⌘A', 'Select All'],['⌘F', 'Canvas Search'],
+                ['Del / ⌫', 'Delete selected'],['Esc', 'Cancel / Deselect'],
+                ['Shift+drag', 'Angle snap while drawing'],['Space+drag', 'Pan temporarily'],
+                ['Hold Ctrl', 'Toggle 3D view'],['?', 'Toggle this help'],
+              ]],
+              ['Canvas', [
+                ['Arrow keys', 'Nudge selected 1ft'],['Shift+arrows', 'Nudge selected 10ft'],
+                ['Double-click', 'Edit nodes'],['Right-click', 'Context menu'],
+              ]],
+            ] as [string, [string, string][]][]).map(([section, shortcuts]) => (
+              <div key={section} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', marginBottom: 6 }}>{section}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px' }}>
+                  {shortcuts.map(([key, desc]) => (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <kbd style={{ fontSize: 10, fontFamily: 'monospace', background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 3, padding: '1px 5px', color: 'var(--color-text)', whiteSpace: 'nowrap', flexShrink: 0 }}>{key}</kbd>
+                      <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 8, textAlign: 'center' }}>Press <kbd style={{ fontSize: 10, fontFamily: 'monospace', background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 3, padding: '1px 5px' }}>?</kbd> to dismiss</div>
+          </div>
         </div>
       )}
 

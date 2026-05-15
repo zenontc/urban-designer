@@ -8,6 +8,37 @@ import { lineStringLengthFt, polygonAreaSqFt, sqFtToAcres, sqFtToHa, ftToM, fmtN
 import type { UMPFeature } from '../../store/canvasStore'
 import type { UMPFeatureProperties } from '../../elements/types'
 
+function collectCoords(geom: GeoJSON.Geometry): [number, number][] {
+  if (geom.type === 'Point') return [geom.coordinates as [number, number]]
+  if (geom.type === 'LineString') return geom.coordinates as [number, number][]
+  if (geom.type === 'Polygon') return geom.coordinates.flat() as [number, number][]
+  if (geom.type === 'MultiPolygon') return geom.coordinates.flat(2) as [number, number][]
+  return []
+}
+
+function getGeomBounds(geom: GeoJSON.Geometry) {
+  const cs = collectCoords(geom)
+  if (!cs.length) return null
+  return {
+    minLng: Math.min(...cs.map(c => c[0])),
+    maxLng: Math.max(...cs.map(c => c[0])),
+    minLat: Math.min(...cs.map(c => c[1])),
+    maxLat: Math.max(...cs.map(c => c[1])),
+  }
+}
+
+function translateCoord(c: number[], dLng: number, dLat: number): number[] {
+  return [c[0] + dLng, c[1] + dLat, ...c.slice(2)]
+}
+
+function translateGeometry(geom: GeoJSON.Geometry, dLng: number, dLat: number): GeoJSON.Geometry {
+  if (geom.type === 'Point') return { ...geom, coordinates: translateCoord(geom.coordinates as number[], dLng, dLat) }
+  if (geom.type === 'LineString') return { ...geom, coordinates: geom.coordinates.map(c => translateCoord(c, dLng, dLat)) }
+  if (geom.type === 'Polygon') return { ...geom, coordinates: geom.coordinates.map(ring => ring.map(c => translateCoord(c, dLng, dLat))) }
+  if (geom.type === 'MultiPolygon') return { ...geom, coordinates: geom.coordinates.map(poly => poly.map(ring => ring.map(c => translateCoord(c, dLng, dLat)))) }
+  return geom
+}
+
 const PHASES: UMPFeatureProperties['phase'][] = ['existing', 'phase-1', 'phase-2', 'phase-3']
 const PHASE_LABELS: Record<string, string> = {
   existing: 'Existing', 'phase-1': 'Phase 1', 'phase-2': 'Phase 2', 'phase-3': 'Phase 3',
@@ -36,7 +67,7 @@ function computeStats(feature: UMPFeature, units: 'ft' | 'm') {
 
 export function DetailsZone() {
   const { units } = useUIStore()
-  const { selectedIds, features, updateFeature, deleteFeature } = useCanvasStore()
+  const { selectedIds, features, updateFeature, deleteFeature, updateGeometry } = useCanvasStore()
 
   const selectedFeatures = features.filter(f => selectedIds.includes(f.properties.id))
   const single = selectedFeatures.length === 1 ? selectedFeatures[0] : null
@@ -57,7 +88,7 @@ export function DetailsZone() {
           )}
         </>
       ) : selectedFeatures.length > 1 ? (
-        <MultiSelection features={selectedFeatures} updateFeature={updateFeature} />
+        <MultiSelection features={selectedFeatures} updateFeature={updateFeature} updateGeometry={updateGeometry} />
       ) : (
         <EmptyState />
       )}
@@ -225,19 +256,68 @@ function FlagToggle({ label, value, onChange }: { label: string; value: boolean;
   )
 }
 
-function MultiSelection({ features, updateFeature }: {
+function MultiSelection({ features, updateFeature, updateGeometry }: {
   features: UMPFeature[]
   updateFeature: (id: string, props: Partial<UMPFeatureProperties>) => void
+  updateGeometry: (id: string, geom: GeoJSON.Geometry) => void
 }) {
   function setPhaseAll(phase: UMPFeatureProperties['phase']) {
     features.forEach(f => updateFeature(f.properties.id, { phase }))
   }
+
+  function align(type: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom') {
+    const bounds = features.map(f => ({ f, b: getGeomBounds(f.geometry) })).filter(x => x.b)
+    if (bounds.length < 2) return
+
+    let target: number
+    if (type === 'left')    target = Math.min(...bounds.map(x => x.b!.minLng))
+    else if (type === 'right')   target = Math.max(...bounds.map(x => x.b!.maxLng))
+    else if (type === 'centerH') target = bounds.reduce((s, x) => s + (x.b!.minLng + x.b!.maxLng) / 2, 0) / bounds.length
+    else if (type === 'top')     target = Math.max(...bounds.map(x => x.b!.maxLat))
+    else if (type === 'bottom')  target = Math.min(...bounds.map(x => x.b!.minLat))
+    else                         target = bounds.reduce((s, x) => s + (x.b!.minLat + x.b!.maxLat) / 2, 0) / bounds.length
+
+    bounds.forEach(({ f, b }) => {
+      const isH = ['left', 'centerH', 'right'].includes(type)
+      const current = isH
+        ? (type === 'left' ? b!.minLng : type === 'right' ? b!.maxLng : (b!.minLng + b!.maxLng) / 2)
+        : (type === 'top'  ? b!.maxLat : type === 'bottom' ? b!.minLat : (b!.minLat + b!.maxLat) / 2)
+      const delta = target - current
+      const newGeom = translateGeometry(f.geometry, isH ? delta : 0, isH ? 0 : delta)
+      updateGeometry(f.properties.id, newGeom)
+    })
+  }
+
+  const alignBtn = (label: string, action: () => void, title: string) => (
+    <button key={label} onClick={action} title={title} style={{
+      flex: 1, height: 26, fontSize: 9, fontWeight: 600, borderRadius: 4,
+      border: '1px solid var(--color-border)', background: 'transparent',
+      color: 'var(--color-text-sec)', cursor: 'pointer', padding: 0,
+    }}>{label}</button>
+  )
 
   return (
     <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 12, color: 'var(--color-text)', fontWeight: 500 }}>
         {features.length} features selected
       </div>
+
+      {/* Align */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)' }}>Align</span>
+        <div style={{ display: 'flex', gap: 3 }}>
+          {alignBtn('⊢ Left',  () => align('left'),    'Align left edges')}
+          {alignBtn('⊣⊢ H',   () => align('centerH'), 'Center horizontally')}
+          {alignBtn('Right ⊣', () => align('right'),   'Align right edges')}
+        </div>
+        <div style={{ display: 'flex', gap: 3 }}>
+          {alignBtn('⊤ Top',   () => align('top'),     'Align top edges')}
+          {alignBtn('⊥⊤ V',   () => align('centerV'), 'Center vertically')}
+          {alignBtn('Bot ⊥',  () => align('bottom'),  'Align bottom edges')}
+        </div>
+      </div>
+
+      {/* Phase */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)' }}>Set Phase</span>
         <div style={{ display: 'flex', gap: 4 }}>

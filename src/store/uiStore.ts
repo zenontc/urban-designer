@@ -68,6 +68,10 @@ interface UIState {
   shadowAltitude: number
   setShadowSun: (azimuth: number, altitude: number) => void
   setUnits: (u: 'ft' | 'm') => void
+  hiddenPhases: string[]
+  togglePhase: (phase: string) => void
+  showFeatureLabels: boolean
+  toggleFeatureLabels: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -104,4 +108,12 @@ export const useUIStore = create<UIState>((set) => ({
   toggleZone: (zone) => set((s) => ({ zoneCollapsed: { ...s.zoneCollapsed, [zone]: !s.zoneCollapsed[zone] } })),
   setShadowSun: (azimuth, altitude) => set({ shadowAzimuth: azimuth, shadowAltitude: altitude }),
   setUnits: (u) => set({ units: u }),
+  hiddenPhases: [] as string[],
+  togglePhase: (phase: string) => set((s) => ({
+    hiddenPhases: s.hiddenPhases.includes(phase)
+      ? s.hiddenPhases.filter(p => p !== phase)
+      : [...s.hiddenPhases, phase],
+  })),
+  showFeatureLabels: false,
+  toggleFeatureLabels: () => set((s) => ({ showFeatureLabels: !s.showFeatureLabels })),
 }))

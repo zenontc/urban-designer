@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { ZoneHeader } from '../components/ZoneHeader'
 import { useUIStore } from '../../store/uiStore'
 import { useCanvasStore } from '../../store/canvasStore'
+import { useProjectStore } from '../../store/projectStore'
 import {
   polygonAreaSqFt, lineStringLengthFt,
   sqFtToAcres, sqFtToHa, ftToM, fmtNum,
@@ -28,9 +29,37 @@ function getLineCoords(geometry: GeoJSON.Geometry): number[][] | null {
   return null
 }
 
+function exportMetricsCSV(features: import('../../store/canvasStore').UMPFeature[], projectName: string, units: 'ft' | 'm') {
+  const rows = ['id,label,category,elementType,phase,geometry,area_or_length,unit']
+  features.forEach(f => {
+    const geom = f.geometry
+    let val = '', unit = ''
+    const coords = geom.type === 'Polygon' ? geom.coordinates[0]
+      : geom.type === 'MultiPolygon' ? geom.coordinates[0][0] : null
+    const lcoords = geom.type === 'LineString' ? geom.coordinates
+      : geom.type === 'MultiLineString' ? geom.coordinates[0] : null
+    if (coords) {
+      const sqFt = polygonAreaSqFt(coords as [number,number][])
+      val = units === 'm' ? fmtNum(sqFtToHa(sqFt), 4) : fmtNum(sqFtToAcres(sqFt), 4)
+      unit = units === 'm' ? 'ha' : 'ac'
+    } else if (lcoords) {
+      const ft = lineStringLengthFt(lcoords as [number,number][])
+      val = units === 'm' ? fmtNum(ftToM(ft)) : fmtNum(ft)
+      unit = units === 'm' ? 'm' : 'ft'
+    }
+    rows.push(`${f.properties.id},"${f.properties.label}",${f.properties.category},${f.properties.elementType},${f.properties.phase},${geom.type},${val},${unit}`)
+  })
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `${projectName}-metrics.csv`; a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function MetricsZone() {
   const { zoneCollapsed, toggleZone, units } = useUIStore()
   const { features } = useCanvasStore()
+  const { projectName } = useProjectStore()
   const [phase, setPhase] = useState<Phase>('all')
   const collapsed = zoneCollapsed['metrics']
 
@@ -122,12 +151,16 @@ export function MetricsZone() {
       )}
 
       <div style={{ padding: '6px 10px', borderTop: '1px solid var(--color-border)' }}>
-        <button style={{
-          width: '100%', height: 26, fontSize: 11, fontWeight: 500, borderRadius: 4,
-          border: '1px solid var(--color-border)', background: 'transparent',
-          color: 'var(--color-text-sec)', cursor: 'pointer',
-        }}>
-          Export Report…
+        <button
+          onClick={() => exportMetricsCSV(filtered, projectName, units)}
+          disabled={metrics.total === 0}
+          style={{
+            width: '100%', height: 26, fontSize: 11, fontWeight: 500, borderRadius: 4,
+            border: '1px solid var(--color-border)', background: 'transparent',
+            color: metrics.total === 0 ? 'var(--color-text-muted)' : 'var(--color-text-sec)',
+            cursor: metrics.total === 0 ? 'default' : 'pointer',
+          }}>
+          Export CSV…
         </button>
       </div>
     </ZoneHeader>
