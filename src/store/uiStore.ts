@@ -64,6 +64,9 @@ interface UIState {
   setCanvasSearchQuery: (q: string) => void
   setRightPanelWidth: (w: number) => void
   toggleZone: (zone: string) => void
+  shadowAzimuth: number
+  shadowAltitude: number
+  setShadowSun: (azimuth: number, altitude: number) => void
   setUnits: (u: 'ft' | 'm') => void
 }
 
@@ -83,6 +86,8 @@ export const useUIStore = create<UIState>((set) => ({
   panelZoneHeights: { style: 20, library: 30, details: 25, layers: 15, metrics: 10 },
   zoneCollapsed: { style: false, library: true, details: true, layers: true, metrics: true },
   units: 'ft',
+  shadowAzimuth: 0,
+  shadowAltitude: 0.5,
 
   setActiveTool: (tool) => set({ activeTool: tool }),
   setActiveElementType: (type) => set({ activeElementType: type }),
@@ -97,5 +102,6 @@ export const useUIStore = create<UIState>((set) => ({
   setCanvasSearchQuery: (q) => set({ canvasSearchQuery: q }),
   setRightPanelWidth: (w) => set({ rightPanelWidth: Math.min(480, Math.max(260, w)) }),
   toggleZone: (zone) => set((s) => ({ zoneCollapsed: { ...s.zoneCollapsed, [zone]: !s.zoneCollapsed[zone] } })),
+  setShadowSun: (azimuth, altitude) => set({ shadowAzimuth: azimuth, shadowAltitude: altitude }),
   setUnits: (u) => set({ units: u }),
 }))

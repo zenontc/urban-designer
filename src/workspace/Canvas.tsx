@@ -438,9 +438,9 @@ export function Canvas() {
 
   const { setMapInstance, setZoom, setCenter, setRotation, setPitch } = useMapStore()
   const {
-    activeTool, setActiveTool, activeStyle, activeElementType,
-    nightMode, mode3D, showCanvasSearch, canvasSearchQuery,
-    setCanvasSearchQuery, toggleCanvasSearch,
+    activeTool, setActiveTool, activeStyle, activeElementType, setActiveElementType,
+    nightMode, mode3D, setMode3D, showCanvasSearch, canvasSearchQuery,
+    setCanvasSearchQuery, toggleCanvasSearch, showShadowPanel, shadowAzimuth, shadowAltitude,
   } = useUIStore()
   const { features, selectedIds, addFeature, updateGeometry, updateFeature, deleteFeatures, setSelectedIds, bringToFront, sendToBack } = useCanvasStore()
   const { layers, groups, addLayer, addGroup, moveLayerToGroup } = useLayersStore()
@@ -650,6 +650,7 @@ export function Canvas() {
             setCursorPos(null)
             setMeasurePts([])
             setActiveTool('select')
+            setActiveElementType(null)
             setSelectedIds([])
             setNodeEditingId(null)
             break
@@ -730,6 +731,26 @@ export function Canvas() {
     window.addEventListener('keyup', onKeyUp)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
   }, [])
+
+  // ── Hold Ctrl → temporary 3D view ────────────────────────────────────────
+  useEffect(() => {
+    const timer = { id: 0 }
+    const active = { on: false }
+    function onDown(e: KeyboardEvent) {
+      if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) {
+        timer.id = window.setTimeout(() => { active.on = true; setMode3D(true) }, 600)
+      }
+    }
+    function onUp(e: KeyboardEvent) {
+      if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+        clearTimeout(timer.id)
+        if (active.on) { active.on = false; setMode3D(false) }
+      }
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    return () => { window.removeEventListener('keydown', onDown); window.removeEventListener('keyup', onUp) }
+  }, [setMode3D])
 
   // ── Canvas coordinates ────────────────────────────────────────────────────
   const getCanvasXY = useCallback((e: React.MouseEvent): [number, number] => {
@@ -1256,6 +1277,7 @@ export function Canvas() {
             el.id, el.category,
             { style: { ...activeStyleRef.current, ...el.defaultStyle }, label: el.label },
           ))
+          setActiveElementType(null)
           return
         }
       }
@@ -1644,12 +1666,20 @@ export function Canvas() {
 
     // Furniture: street light / ped light
     if (elId === 'street-light' || elId === 'ped-light') {
+      const isNight = (f as unknown as { nightMode?: boolean }).nightMode
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+          {nightMode && (
+            <circle cx={px + 6} cy={py - 8} r={18} fill="#FCD34D" fillOpacity={0.12} />
+          )}
+          {nightMode && (
+            <circle cx={px + 6} cy={py - 8} r={10} fill="#FCD34D" fillOpacity={0.2} />
+          )}
           <line x1={px} y1={py + 8} x2={px} y2={py - 8} stroke={fill} strokeWidth={2} strokeLinecap="round" />
           <line x1={px} y1={py - 8} x2={px + 6} y2={py - 8} stroke={fill} strokeWidth={2} strokeLinecap="round" />
-          <circle cx={px + 6} cy={py - 8} r={3} fill="#FCD34D" stroke={fill} strokeWidth={1} />
+          <circle cx={px + 6} cy={py - 8} r={nightMode ? 4 : 3} fill={nightMode ? '#FDE68A' : '#FCD34D'} stroke={fill} strokeWidth={1} />
           {isSelected && <circle cx={px} cy={py} r={13} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          {isNight && null}
         </g>
       )
     }
@@ -1666,6 +1696,32 @@ export function Canvas() {
           </text>
           {isSelected && <rect x={px - 13} y={py - 13} width={26} height={26} rx={5}
             fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Direction arrows (markings)
+    if (cat === 'markings' && (elId === 'direction-arrow' || elId === 'left-turn-arrow' || elId === 'right-turn-arrow')) {
+      const arrowRot = elId === 'left-turn-arrow' ? -45 : elId === 'right-turn-arrow' ? 45 : 0
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py}) rotate(${arrowRot})`} style={{ pointerEvents: 'none' }}>
+          <path d="M0,-12 L5,-2 L2,-2 L2,12 L-2,12 L-2,-2 L-5,-2 Z"
+            fill={fill} stroke={strokeColor} strokeWidth={sw * 0.5} strokeLinejoin="round" />
+          {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Sharrow / bicycle stencil
+    if (elId === 'sharrow') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <path d="M0,-12 L4,-5 L1.5,-5 L1.5,2 L4,2 L0,8 L-4,2 L-1.5,2 L-1.5,-5 L-4,-5 Z"
+            fill={fill} stroke="none" />
+          <ellipse cx={0} cy={12} rx={5} ry={3} fill="none" stroke={fill} strokeWidth={1.5} />
+          <path d="M-7,11 C-7,6 -4,5 0,5 C4,5 7,6 7,11"
+            fill="none" stroke={fill} strokeWidth={1.5} />
+          {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
         </g>
       )
     }
@@ -1979,6 +2035,37 @@ export function Canvas() {
         )
       }
 
+      // ── Building/polygon shadow ──
+      const extH = style.extrudeHeight ?? 0
+      if (showShadowPanel && extH > 0 && !isLine && map) {
+        const shadowFactor = shadowAltitude > 0.05 ? 1 / Math.tan(shadowAltitude) : 20
+        const shadowLengthFt = extH * 3.28084 * shadowFactor * 0.5
+        const coords0 = f.geometry.type === 'Polygon'
+          ? ((f.geometry as GeoJSON.Polygon).coordinates[0] as [number,number][])
+          : []
+        if (coords0.length > 0) {
+          const avgLat = coords0.reduce((s, c) => s + c[1], 0) / coords0.length
+          const lenPx = (shadowLengthFt / 5280) * (40075016.68 * Math.cos(avgLat * Math.PI / 180) / Math.pow(2, (mapRef.current as unknown as { getZoom?: () => number })?.getZoom?.() ?? 15)) * 256 / (40075016.68 / 5280)
+          const sDx = -Math.sin(shadowAzimuth + Math.PI) * lenPx
+          const sDy = Math.cos(shadowAzimuth + Math.PI) * lenPx
+          const shadowPts = coords0.map(c => { const [sx2, sy2] = lngLatToScreen(map, c); return [sx2 + sDx, sy2 + sDy] })
+          const shadowD = shadowPts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ') + ' Z'
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <path d={shadowD} fill="rgba(0,0,0,0.28)" />
+              {!isLine && (
+                <path d={path} fill={style.fillColor ?? '#2563EB'}
+                  fillOpacity={(style.fillOpacity ?? 70) / 100} fillRule="evenodd" />
+              )}
+              <path d={path} fill="none" stroke={strokeColor}
+                strokeWidth={isSelected ? sw + 1.5 : sw}
+                strokeDasharray={dash} strokeLinecap="round" strokeLinejoin="round" />
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 3} strokeOpacity={0.25} />}
+            </g>
+          )
+        }
+      }
+
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
           {!isLine && (
@@ -2284,11 +2371,17 @@ export function Canvas() {
           <g id="place-preview-layer">{renderPlacePreview()}</g>
           <g id="selection-layer">{renderSelection()}</g>
 
-          {/* Rotate cursor hint */}
+          {/* Rotate cursor hint — Illustrator style, white with dark outline */}
           {hoveredRotHandle && cursorPos && (
-            <g transform={`translate(${cursorPos[0] + 10},${cursorPos[1] - 10})`} style={{ pointerEvents: 'none' }}>
-              <path d="M0,9 A9,9,0,0,0,9,0" fill="none" stroke="#2563EB" strokeWidth="2.5" strokeLinecap="round"/>
-              <path d="M9,0 L6,-4 M9,0 L13,1" stroke="#2563EB" strokeWidth="2" strokeLinecap="round"/>
+            <g transform={`translate(${cursorPos[0] + 12},${cursorPos[1] - 12})`} style={{ pointerEvents: 'none' }}>
+              {/* Dark outline for visibility */}
+              <path d="M2,13 A11,11,0,0,1,13,2" fill="none" stroke="rgba(0,0,0,0.6)" strokeWidth="4.5" strokeLinecap="round"/>
+              <path d="M2,13 L-3,9 M2,13 L7,10" stroke="rgba(0,0,0,0.6)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M13,2 L16,-2 M13,2 L9,-1" stroke="rgba(0,0,0,0.6)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* White icon */}
+              <path d="M2,13 A11,11,0,0,1,13,2" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+              <path d="M2,13 L-3,9 M2,13 L7,10" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M13,2 L16,-2 M13,2 L9,-1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </g>
           )}
           <g id="measure-layer">{renderMeasure()}</g>
@@ -2298,7 +2391,7 @@ export function Canvas() {
             <rect
               x={Math.min(marquee.x1, marquee.x2)} y={Math.min(marquee.y1, marquee.y2)}
               width={Math.abs(marquee.x2 - marquee.x1)} height={Math.abs(marquee.y2 - marquee.y1)}
-              fill="rgba(37,99,235,0.07)" stroke="#2563EB" strokeWidth={1} strokeDasharray="4 3" />
+              fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.75)" strokeWidth={1} strokeDasharray="4 3" />
           )}
         </svg>
       )}
@@ -2489,18 +2582,21 @@ export function Canvas() {
       {/* Extrude panel */}
       {selectedPolygon && (
         <div style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 20, background: 'var(--color-bg-panel)', border: '1px solid var(--color-border)', borderRadius: 10, padding: '12px 20px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>Extrude to 3D</div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>Extrude to 3D</div>
+            <button onClick={() => setActiveTool('select')} style={{ width: 20, height: 20, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input type="range" min={0} max={200} step={1} value={extrudeHeight}
-              onChange={e => { const h = +e.target.value; setExtrudeHeight(h); applyExtrude(h) }}
+            <input type="range" min={0} max={650} step={5} value={Math.round(extrudeHeight * 3.28084)}
+              onChange={e => { const hFt = +e.target.value; const hM = hFt / 3.28084; setExtrudeHeight(hM); applyExtrude(hM) }}
               style={{ flex: 1 }} />
-            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', minWidth: 50 }}>{extrudeHeight} m</span>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', minWidth: 56 }}>{Math.round(extrudeHeight * 3.28084)} ft</span>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {[10, 20, 30, 50, 100].map(h => (
-              <button key={h} onClick={() => { setExtrudeHeight(h); applyExtrude(h) }}
-                style={{ flex: 1, height: 24, fontSize: 10, fontWeight: 600, borderRadius: 4, border: '1px solid var(--color-border)', background: extrudeHeight === h ? 'var(--color-accent-subtle)' : 'transparent', color: extrudeHeight === h ? 'var(--color-accent)' : 'var(--color-text-muted)', cursor: 'pointer' }}>
-                {h}m</button>
+            {[10, 20, 40, 80, 150, 300].map(hFt => (
+              <button key={hFt} onClick={() => { const hM = hFt / 3.28084; setExtrudeHeight(hM); applyExtrude(hM) }}
+                style={{ flex: 1, height: 24, fontSize: 10, fontWeight: 600, borderRadius: 4, border: '1px solid var(--color-border)', background: Math.abs(extrudeHeight * 3.28084 - hFt) < 1 ? 'var(--color-accent-subtle)' : 'transparent', color: Math.abs(extrudeHeight * 3.28084 - hFt) < 1 ? 'var(--color-accent)' : 'var(--color-text-muted)', cursor: 'pointer' }}>
+                {hFt}ft</button>
             ))}
           </div>
         </div>

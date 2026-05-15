@@ -10,7 +10,7 @@ function fmt(d: Date) { return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 export function ShadowPanel() {
-  const { toggleShadowPanel } = useUIStore()
+  const { toggleShadowPanel, setShadowSun } = useUIStore()
   const { center } = useMapStore()
 
   const [date, setDate] = useState(() => {
@@ -19,8 +19,9 @@ export function ShadowPanel() {
   const [playing, setPlaying] = useState(false)
   const intervalRef = useRef<number>(0)
 
-  // Compute sun position
+  // Compute sun position and push to store for map shadow rendering
   const pos = SunCalc.getPosition(date, center[1], center[0])
+  useEffect(() => { setShadowSun(pos.azimuth, pos.altitude) }, [pos.azimuth, pos.altitude, setShadowSun])
   const azimuthDeg = (pos.azimuth * 180 / Math.PI + 180) % 360
   const altitudeDeg = pos.altitude * 180 / Math.PI
   const isDaytime = pos.altitude > 0

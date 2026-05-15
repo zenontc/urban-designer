@@ -8,6 +8,7 @@ import { ShadowPanel } from '../workspace/ShadowPanel'
 import { ShareModal } from '../workspace/ShareModal'
 import { AuthModal } from '../workspace/AuthModal'
 import { CrossSectionEditor } from '../workspace/CrossSectionEditor'
+import { ScaleBar } from '../workspace/ScaleBar'
 import { PrintLayoutModal } from '../workspace/PrintLayoutModal'
 import { ScenarioPanel } from '../workspace/ScenarioPanel'
 import { ContextMenu } from '../workspace/ContextMenu'
@@ -68,8 +69,9 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
         <LeftElementsPanel />
 
         {/* Canvas + floating panels container */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           onContextMenu={handleContextMenu}>
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <Canvas />
           <ImportZone />
 
@@ -100,6 +102,8 @@ export function WorkspacePage({ onNavigate }: WorkspacePageProps) {
               </span>
             ))}
           </div>
+          </div>
+          <ScaleBar />
         </div>
 
         <RightPanel />
