@@ -72,6 +72,10 @@ const LANES_BY_TYPE: Record<string, StreetLane[]> = {
 
 const DEFAULT_LANES = LANES_BY_TYPE['arterial']
 
+export function defaultLanesForType(elementType: string): StreetLane[] {
+  return LANES_BY_TYPE[elementType] ?? DEFAULT_LANES
+}
+
 interface CrossSectionInlineProps {
   feature: UMPFeature
   onUpdate: (lanes: StreetLane[]) => void

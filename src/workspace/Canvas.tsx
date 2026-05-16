@@ -9,6 +9,7 @@ import { useLayersStore } from '../store/layersStore'
 import type { LayerItem } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
 import { ELEMENT_CATEGORIES } from '../elements/categories'
+import { CrossSectionInline, defaultLanesForType } from './CrossSectionInline'
 import {
   lngLatToScreen, screenToLngLat, feetToPixels, haversineFt, fmtDist,
   distToSegment, pointInPolygon, screenBbox,
@@ -289,6 +290,27 @@ function translateGeometry(map: mapboxgl.Map, geom: GeoJSON.Geometry, dx: number
 
 // ── Polyline helpers ────────────────────────────────────────────────────────
 
+function offsetPolylinePoints(pts: [number,number][], dist: number): [number,number][] {
+  if (pts.length < 2) return pts
+  const normals: [number,number][] = pts.slice(0,-1).map((_,i) => {
+    const dx = pts[i+1][0] - pts[i][0]
+    const dy = pts[i+1][1] - pts[i][1]
+    const len = Math.hypot(dx, dy) || 1
+    return [-dy/len, dx/len] as [number,number]
+  })
+  return pts.map((p, i) => {
+    let nx: number, ny: number
+    if (i === 0) { [nx,ny] = normals[0] }
+    else if (i === pts.length-1) { [nx,ny] = normals[normals.length-1] }
+    else {
+      nx = (normals[i-1][0]+normals[i][0])/2
+      ny = (normals[i-1][1]+normals[i][1])/2
+      const l = Math.hypot(nx,ny)||1; nx/=l; ny/=l
+    }
+    return [p[0]+nx*dist, p[1]+ny*dist] as [number,number]
+  })
+}
+
 function samplePolyline(map: mapboxgl.Map, coords: [number, number][], spacingPx: number): [number, number][] {
   const pts: [number, number][] = []
   let accumulated = 0
@@ -495,46 +517,73 @@ export function Canvas() {
     if (!token) { setMapError('Missing VITE_MAPBOX_TOKEN in .env'); return }
     mapboxgl.accessToken = token
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAP_STYLES.satellite,
-      center: INITIAL_CENTER,
-      zoom: INITIAL_ZOOM,
-      antialias: true,
-      fadeDuration: 0,
-      preserveDrawingBuffer: true,
-      dragRotate: false,
-    })
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
 
-    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
-    map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
-
-    map.on('load', () => {
-      styleLoadedRef.current = true
-      setMapInstance(map)
-      setMapError(null)
-      // Auto-fly to user's location
-      navigator.geolocation?.getCurrentPosition(pos => {
-        map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 })
+    function createMap(center: [number, number], zoom: number) {
+      if (cancelled || !mapContainerRef.current) return
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: MAP_STYLES.satellite,
+        center,
+        zoom,
+        antialias: true,
+        fadeDuration: 0,
+        preserveDrawingBuffer: true,
+        dragRotate: false,
       })
-    })
-    map.on('error', (e) => {
-      const msg = e.error?.message ?? ''
-      if (msg.includes('401') || msg.includes('token') || msg.includes('Unauthorized'))
-        setMapError('Invalid Mapbox token. Check your .env file.')
-    })
-    map.on('style.load', () => { styleLoadedRef.current = true })
-    map.on('move', () => {
-      setMapVersion(v => v + 1)
-      const c = map.getCenter()
-      setCenter([c.lng, c.lat])
-      setZoom(map.getZoom())
-      setRotation(map.getBearing())
-      setPitch(map.getPitch())
-    })
 
-    mapRef.current = map
-    return () => { map.remove(); mapRef.current = null; setMapInstance(null) }
+      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
+      map.addControl(new mapboxgl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
+
+      map.on('load', () => {
+        styleLoadedRef.current = true
+        setMapInstance(map)
+        setMapError(null)
+      })
+      map.on('error', (e) => {
+        const msg = e.error?.message ?? ''
+        if (msg.includes('401') || msg.includes('token') || msg.includes('Unauthorized'))
+          setMapError('Invalid Mapbox token. Check your .env file.')
+      })
+      map.on('style.load', () => { styleLoadedRef.current = true })
+      map.on('move', () => {
+        setMapVersion(v => v + 1)
+        const c = map.getCenter()
+        setCenter([c.lng, c.lat])
+        setZoom(map.getZoom())
+        setRotation(map.getBearing())
+        setPitch(map.getPitch())
+      })
+
+      mapRef.current = map
+    }
+
+    if (navigator.geolocation) {
+      // Wait up to 3s for location; fall back to a world view
+      timer = setTimeout(() => createMap([-96, 38], 4), 3000)
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          if (timer) clearTimeout(timer)
+          createMap([pos.coords.longitude, pos.coords.latitude], 15)
+        },
+        () => {
+          if (timer) clearTimeout(timer)
+          createMap([-96, 38], 4)
+        },
+        { timeout: 3000, maximumAge: 300000 },
+      )
+    } else {
+      createMap([-96, 38], 4)
+    }
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      mapRef.current?.remove()
+      mapRef.current = null
+      setMapInstance(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1640,11 +1689,23 @@ export function Canvas() {
 
     // Trees
     if (elId === 'tree' || elId === 'storm-tree-pit') {
+      const r = 10
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-          <circle cx={px} cy={py} r={10} fill={fill} fillOpacity={0.75} stroke={strokeColor} strokeWidth={sw} />
-          <circle cx={px - 2} cy={py - 2} r={4} fill={fill} fillOpacity={0.5} />
-          {isSelected && <circle cx={px} cy={py} r={14} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          {/* Trunk shadow */}
+          <circle cx={px+1} cy={py+1} r={r} fill="rgba(0,0,0,0.15)" />
+          {/* Main canopy */}
+          <circle cx={px} cy={py} r={r} fill={fill} fillOpacity={0.85} />
+          {/* Highlight lobes for organic feel */}
+          <circle cx={px-3} cy={py-3} r={5} fill={fill} fillOpacity={0.6} />
+          <circle cx={px+4} cy={py-2} r={4} fill={fill} fillOpacity={0.5} />
+          <circle cx={px+1} cy={py+4} r={4} fill={fill} fillOpacity={0.5} />
+          {/* Canopy highlight */}
+          <circle cx={px-2} cy={py-2} r={3} fill="rgba(255,255,255,0.2)" />
+          {/* Trunk dot */}
+          <circle cx={px} cy={py+r-2} r={1.5} fill="rgba(0,0,0,0.4)" />
+          <circle cx={px} cy={py} r={r} fill="none" stroke={strokeColor} strokeWidth={sw*0.5} />
+          {isSelected && <circle cx={px} cy={py} r={r+4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />}
         </g>
       )
     }
@@ -2178,21 +2239,29 @@ export function Canvas() {
 
       // ── Corridor rendering for street-section elements ──
       if (f.properties.category === 'streets' && isLine) {
-        const el = ELEMENT_CATEGORIES.flatMap(c => c.elements).find(x => x.id === f.properties.elementType)
-        const defaultRow = (el?.defaultProps as { rowWidth?: number })?.rowWidth ?? 30
-        const lanesWidth = f.properties.streetLanes
-          ? f.properties.streetLanes.reduce((s, l) => s + l.width, 0)
-          : defaultRow
+        const lanes = f.properties.streetLanes ?? defaultLanesForType(f.properties.elementType)
         const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
-        const avgLat = coords.reduce((s, c) => s + (c as [number,number])[1], 0) / coords.length
-        const corrPx = Math.max(4, feetToPixels(map, lanesWidth, avgLat))
-        const roadColor = style.strokeColor ?? '#374151'
+        const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
+        const totalWidthFt = lanes.reduce((s, l) => s + l.width, 0)
+        const totalPx = Math.max(4, feetToPixels(map, totalWidthFt, avgLat))
+        const screenPts = coords.map(c => lngLatToScreen(map, c) as [number,number])
+        let cumPx = -totalPx / 2
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={corrPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
-            <path d={path} fill="none" stroke="#111827" strokeWidth={corrPx} strokeLinecap="butt" strokeLinejoin="round" />
-            <path d={path} fill="none" stroke={roadColor} strokeWidth={corrPx - 3} strokeLinecap="butt" strokeLinejoin="round" />
-            <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeLinecap="round" strokeDasharray="8 6" />
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={totalPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
+            {/* Curb/gutter base */}
+            <path d={path} fill="none" stroke="#1a1a1a" strokeWidth={totalPx + 2} strokeLinecap="butt" strokeLinejoin="round" />
+            {/* Colored lane strips */}
+            {lanes.map((lane, i) => {
+              const lanePx = feetToPixels(map, lane.width, avgLat)
+              const centerOff = cumPx + lanePx / 2
+              cumPx += lanePx
+              const offPts = offsetPolylinePoints(screenPts, centerOff)
+              const laneD = offPts.map((p, j) => `${j===0?'M':'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ')
+              return <path key={i} d={laneD} fill="none" stroke={lane.color} strokeWidth={lanePx} strokeLinecap="butt" strokeLinejoin="round" />
+            })}
+            {/* Lane dividers */}
+            <path d={path} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.75} strokeLinecap="round" strokeDasharray="10 7" />
           </g>
         )
       }
@@ -2230,27 +2299,52 @@ export function Canvas() {
         const fillO = (style.fillOpacity ?? 100) / 100
         const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
         if (coords.length >= 4) {
-          const pts = coords.slice(0, 4).map(c => lngLatToScreen(map, c))
-          const left = Math.min(pts[0][0], pts[3][0])
-          const right = Math.max(pts[1][0], pts[2][0])
-          const top2 = Math.min(pts[2][1], pts[3][1])
-          const bottom2 = Math.max(pts[0][1], pts[1][1])
-          const bw = right - left, bh = bottom2 - top2
-          const margin = Math.min(bw, bh) * 0.08
+          const pts = coords.map(c => lngLatToScreen(map, c))
+          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
+          const bx = Math.min(...xs), by = Math.min(...ys)
+          const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by
+          const m = Math.min(bw, bh) * 0.1
+          const parapetPath = path // reuse
           return (
             <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-              {/* Drop shadow */}
-              <path d={path} fill="rgba(0,0,0,0.18)" transform="translate(2,3)" />
-              {/* Building fill */}
+              {/* Ground shadow */}
+              <path d={path} fill="rgba(0,0,0,0.22)" transform="translate(3,5)" />
+              {/* Building body */}
               <path d={path} fill={fillC} fillOpacity={fillO} />
-              {/* Roof/inner lighter area */}
-              {bw > 12 && bh > 12 && (
-                <rect x={left + margin} y={top2 + margin} width={bw - margin * 2} height={bh - margin * 2}
-                  fill="white" fillOpacity={0.07} rx={1} />
+              {/* Roof plane (lighter center) */}
+              {bw > 16 && bh > 16 && (
+                <path d={parapetPath} fill="white" fillOpacity={0.08} />
               )}
-              {/* Stroke */}
-              <path d={path} fill="none" stroke={strokeColor} strokeWidth={isSelected ? sw + 1.5 : sw} />
-              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
+              {/* Parapet / roof edge (inset stroke) */}
+              {bw > 16 && bh > 16 && (
+                <path d={path} fill="none"
+                  stroke="rgba(255,255,255,0.18)" strokeWidth={Math.max(1.5, m * 0.5)}
+                  strokeLinejoin="round"
+                  style={{ clipPath: `inset(0)` }} />
+              )}
+              {/* Window grid hint at larger sizes */}
+              {bw > 30 && bh > 30 && (() => {
+                const cols = Math.max(2, Math.floor(bw / 12))
+                const rows = Math.max(2, Math.floor(bh / 14))
+                const windows = []
+                for (let r = 0; r < rows; r++) {
+                  for (let c = 0; c < cols; c++) {
+                    const wx = bx + m + (c / cols) * (bw - 2*m) + 1
+                    const wy = by + m + (r / rows) * (bh - 2*m) + 2
+                    const ww = (bw - 2*m) / cols - 3
+                    const wh = (bh - 2*m) / rows - 4
+                    if (ww > 2 && wh > 2) windows.push(
+                      <rect key={`${r}-${c}`} x={wx} y={wy} width={ww} height={wh}
+                        fill="rgba(200,230,255,0.12)" rx={0.5} />
+                    )
+                  }
+                }
+                return <>{windows}</>
+              })()}
+              {/* Outer stroke */}
+              <path d={path} fill="none" stroke={isSelected ? selColor : strokeColor}
+                strokeWidth={isSelected ? sw + 1.5 : sw} strokeLinejoin="round" />
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 5} strokeOpacity={0.25} strokeLinejoin="round" />}
             </g>
           )
         }
@@ -2290,14 +2384,21 @@ export function Canvas() {
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
           {!isLine && (
-            <path d={path} fill={style.fillColor ?? '#2563EB'}
-              fillOpacity={(style.fillOpacity ?? 70) / 100} fillRule="evenodd" />
+            <>
+              <path d={path} fill={style.fillColor ?? '#2563EB'}
+                fillOpacity={(style.fillOpacity ?? 70) / 100} fillRule="evenodd" />
+              {/* Subtle inner highlight */}
+              <path d={path} fill="none" stroke="rgba(255,255,255,0.12)"
+                strokeWidth={3} strokeLinejoin="round" />
+            </>
           )}
           <path d={path} fill="none" stroke={strokeColor}
             strokeWidth={isSelected ? sw + 1.5 : sw}
             strokeLinecap={(['butt','round','square'].includes(style.lineCap ?? '') ? style.lineCap : 'round') as 'butt' | 'round' | 'square'}
             strokeLinejoin={(['miter','round','bevel'].includes(style.lineJoin ?? '') ? style.lineJoin : 'round') as 'miter' | 'round' | 'bevel'}
             strokeDasharray={dash} />
+          {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.25}
+            strokeLinecap="round" strokeLinejoin="round" />}
         </g>
       )
     })
