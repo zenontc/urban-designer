@@ -15,15 +15,6 @@ function makeLanes(specs: Array<[string, number, string, string]>): StreetLane[]
 }
 
 const LANES_BY_TYPE: Record<string, StreetLane[]> = {
-  'alley': makeLanes([
-    ['Travel Lane', 16, '#CBD5E1', '🚗'],
-  ]),
-  'bike-lane': makeLanes([
-    ['Bike Lane', 8, '#FEF9C3', '🚲'],
-  ]),
-  'shared-path': makeLanes([
-    ['Shared Path', 12, '#DCFCE7', '🚶'],
-  ]),
   'ped-street': makeLanes([
     ['Sidewalk', 5, '#E2E8F0', '🚶'],
     ['Pedestrian Zone', 20, '#F0FDF4', '🚶'],

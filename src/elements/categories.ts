@@ -30,9 +30,6 @@ export const ELEMENT_CATEGORIES: ElementCategory[] = [
       { id: 'arterial', label: 'Arterial / Boulevard', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#1F2937', strokeWidth: 4 }, defaultProps: { rowWidth: 90 } },
       { id: 'highway', label: 'Highway / Freeway', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#111827', strokeWidth: 6 }, defaultProps: { rowWidth: 200 } },
       { id: 'ped-street', label: 'Pedestrian Street / Woonerf', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#A8A29E', strokeWidth: 2 }, defaultProps: { rowWidth: 30 } },
-      { id: 'alley', label: 'Alley / Service Lane', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#374151', strokeWidth: 1 }, defaultProps: { rowWidth: 16 } },
-      { id: 'bike-lane', label: 'Protected Bike Lane / Cycle Track', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#16A34A', strokeWidth: 2 }, defaultProps: { rowWidth: 8 } },
-      { id: 'shared-path', label: 'Shared Use Path / Greenway', category: 'streets', drawMode: 'line', defaultStyle: { strokeColor: '#D1D5DB', strokeWidth: 2 }, defaultProps: { rowWidth: 12 } },
     ]
   },
   {

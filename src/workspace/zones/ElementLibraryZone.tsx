@@ -642,6 +642,147 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
     )
   }
 
+  // ── Parks & Recreation ────────────────────────────────────────────────
+  if (cat === 'parks') {
+    if (id === 'soccer-field') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#16A34A" />
+          <rect x="4" y="9" width="36" height="26" fill="none" stroke="white" strokeWidth="1" opacity="0.8" />
+          <line x1="22" y1="9" x2="22" y2="35" stroke="white" strokeWidth="0.75" opacity="0.65" />
+          <circle cx="22" cy="22" r="6" fill="none" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <rect x="4" y="15" width="7" height="14" fill="none" stroke="white" strokeWidth="0.75" opacity="0.6" />
+          <rect x="33" y="15" width="7" height="14" fill="none" stroke="white" strokeWidth="0.75" opacity="0.6" />
+        </svg>
+      )
+    }
+    if (id === 'basketball-court') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#C2863A" />
+          <rect x="4" y="11" width="36" height="22" fill="none" stroke="white" strokeWidth="1" opacity="0.85" />
+          <line x1="22" y1="11" x2="22" y2="33" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <circle cx="22" cy="22" r="5" fill="none" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <rect x="4" y="16" width="8" height="12" fill="rgba(255,255,255,0.07)" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <rect x="32" y="16" width="8" height="12" fill="rgba(255,255,255,0.07)" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <path d="M 12,16 A 6 6 0 0 1 12,28" fill="none" stroke="white" strokeWidth="0.75" opacity="0.6" />
+          <path d="M 32,16 A 6 6 0 0 0 32,28" fill="none" stroke="white" strokeWidth="0.75" opacity="0.6" />
+        </svg>
+      )
+    }
+    if (id === 'tennis-court') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#2563EB" />
+          <rect x="4" y="9" width="36" height="26" fill="none" stroke="white" strokeWidth="1" opacity="0.85" />
+          {/* Singles sidelines */}
+          <line x1="4" y1="14" x2="40" y2="14" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="4" y1="30" x2="40" y2="30" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          {/* Net - vertical at center */}
+          <line x1="22" y1="14" x2="22" y2="30" stroke="white" strokeWidth="2" opacity="0.95" />
+          {/* Service lines */}
+          <line x1="14" y1="14" x2="14" y2="30" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="30" y1="14" x2="30" y2="30" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          {/* Center T */}
+          <line x1="14" y1="22" x2="30" y2="22" stroke="white" strokeWidth="0.75" opacity="0.7" />
+        </svg>
+      )
+    }
+    if (id === 'pickleball-court') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#7C3AED" />
+          <rect x="6" y="8" width="32" height="28" fill="none" stroke="white" strokeWidth="1" opacity="0.85" />
+          <line x1="22" y1="8" x2="22" y2="36" stroke="white" strokeWidth="2" opacity="0.95" />
+          <line x1="16" y1="8" x2="16" y2="36" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="28" y1="8" x2="28" y2="36" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="6" y1="22" x2="16" y2="22" stroke="white" strokeWidth="0.75" opacity="0.6" />
+          <line x1="28" y1="22" x2="38" y2="22" stroke="white" strokeWidth="0.75" opacity="0.6" />
+        </svg>
+      )
+    }
+    if (id === 'volleyball-court') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#92400E" />
+          <rect x="5" y="11" width="34" height="22" fill="rgba(255,220,120,0.2)" stroke="white" strokeWidth="1" opacity="0.85" />
+          <line x1="22" y1="11" x2="22" y2="33" stroke="white" strokeWidth="2" opacity="0.95" />
+          <line x1="16" y1="11" x2="16" y2="33" stroke="white" strokeWidth="0.75" strokeDasharray="3 2" opacity="0.75" />
+          <line x1="28" y1="11" x2="28" y2="33" stroke="white" strokeWidth="0.75" strokeDasharray="3 2" opacity="0.75" />
+        </svg>
+      )
+    }
+    if (id === 'baseball-diamond') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#16A34A" />
+          <polygon points="22,6 38,22 22,38 6,22" fill="rgba(210,190,140,0.25)" stroke="white" strokeWidth="1" opacity="0.85" />
+          <rect x="19" y="4" width="6" height="5" rx="1" fill="white" opacity="0.9" />
+          <rect x="35" y="19" width="5" height="5" rx="1" fill="white" opacity="0.9" />
+          <rect x="19" y="35" width="6" height="5" rx="1" fill="white" opacity="0.9" />
+          <rect x="4" y="19" width="5" height="5" rx="1" fill="white" opacity="0.9" />
+          <circle cx="22" cy="24" r="2" fill="rgba(210,190,140,0.6)" stroke="white" strokeWidth="0.5" />
+        </svg>
+      )
+    }
+    if (id === 'running-track') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#DC2626" />
+          <ellipse cx="22" cy="22" rx="16" ry="13" fill="#16A34A" />
+          {[18, 14, 10].map((rx, i) => (
+            <ellipse key={i} cx="22" cy="22" rx={rx + i * 2} ry={rx * 0.85 + i * 2} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="0.75" />
+          ))}
+          <ellipse cx="22" cy="22" rx="18" ry="15" fill="none" stroke="white" strokeWidth="1" opacity="0.8" />
+        </svg>
+      )
+    }
+    if (id === 'pool') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#0EA5E9" />
+          <rect x="6" y="10" width="32" height="24" rx="2" fill="rgba(186,230,253,0.3)" stroke="white" strokeWidth="1" opacity="0.9" />
+          {[15, 19, 23, 27, 31].map(y => (
+            <line key={y} x1="6" y1={y} x2="38" y2={y} stroke="rgba(255,255,255,0.45)" strokeWidth="0.75" />
+          ))}
+          <line x1="13" y1="10" x2="13" y2="34" stroke="rgba(255,255,255,0.25)" strokeWidth="0.75" strokeDasharray="3 2" />
+          <line x1="31" y1="10" x2="31" y2="34" stroke="rgba(255,255,255,0.25)" strokeWidth="0.75" strokeDasharray="3 2" />
+        </svg>
+      )
+    }
+    if (id === 'bocce-court') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#D97706" />
+          <rect x="4" y="15" width="36" height="14" fill="rgba(210,190,140,0.35)" stroke="white" strokeWidth="1" opacity="0.8" />
+          <line x1="9" y1="15" x2="9" y2="29" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="35" y1="15" x2="35" y2="29" stroke="white" strokeWidth="0.75" opacity="0.7" />
+          <line x1="22" y1="15" x2="22" y2="29" stroke="white" strokeWidth="0.75" strokeDasharray="3 2" opacity="0.5" />
+          <circle cx="22" cy="22" r="3" fill="rgba(255,255,255,0.4)" stroke="white" strokeWidth="0.5" />
+        </svg>
+      )
+    }
+    if (id === 'picnic-shelter') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#374151" />
+          <rect x="8" y="12" width="28" height="20" fill={hex(fillC, 0.5)} stroke={fillC} strokeWidth="1" />
+          <line x1="8" y1="12" x2="22" y2="6" stroke={fillC} strokeWidth="1" opacity="0.8" />
+          <line x1="36" y1="12" x2="22" y2="6" stroke={fillC} strokeWidth="1" opacity="0.8" />
+          <line x1="8" y1="12" x2="8" y2="32" stroke={fillC} strokeWidth="1.2" opacity="0.7" />
+          <line x1="36" y1="12" x2="36" y2="32" stroke={fillC} strokeWidth="1.2" opacity="0.7" />
+        </svg>
+      )
+    }
+    // Generic park element
+    return (
+      <svg width="44" height="44" viewBox="0 0 44 44">
+        <rect width="44" height="44" rx="4" fill={hex(fillC, 0.7)} />
+        <rect x="4" y="4" width="36" height="36" rx="3" fill="none" stroke="white" strokeWidth="1" opacity="0.7" />
+      </svg>
+    )
+  }
+
   // ── Actors ─────────────────────────────────────────────────────────────
   if (cat === 'actors') {
     if (id === 'car' || id === 'delivery-vehicle' || id === 'bus-vehicle') {

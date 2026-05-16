@@ -600,6 +600,7 @@ export function Canvas() {
     const map = mapRef.current
     if (!map || !styleLoadedRef.current) return
     if (mode3D) {
+      map.dragRotate.enable()
       map.easeTo({ pitch: 55, duration: 600 })
       // Narrow FOV ≈ parallel/isometric projection
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -616,7 +617,8 @@ export function Canvas() {
           },
         })
     } else {
-      map.easeTo({ pitch: 0, duration: 600 })
+      map.dragRotate.disable()
+      map.easeTo({ pitch: 0, bearing: 0, duration: 600 })
       // Restore default FOV (~36°)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(map as any).transform.fov = 36.87
@@ -629,18 +631,24 @@ export function Canvas() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !styleLoadedRef.current) return
-    const extrudable = features.filter(f =>
-      f.geometry.type === 'Polygon' && (f.properties.style?.extrudeHeight ?? 0) > 0
-    )
+    // In 3D mode: auto-extrude all buildings. Outside 3D: no extrusions.
+    const extrudable = mode3D
+      ? features.filter(f => f.geometry.type === 'Polygon' && f.properties.category === 'buildings')
+      : []
     const geojson: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
-      features: extrudable.map(f => ({
-        ...f,
-        properties: {
-          height: f.properties.style.extrudeHeight ?? 10,
-          color: f.properties.style.fillColor ?? '#6366F1',
-        },
-      })),
+      features: extrudable.map(f => {
+        const explicitH = f.properties.style?.extrudeHeight ?? 0
+        const floors = (f.properties.floors ?? 2) as number
+        const heightM = explicitH > 0 ? explicitH : floors * 3.5
+        return {
+          ...f,
+          properties: {
+            height: heightM,
+            color: '#FFFFFF',
+          },
+        }
+      }),
     }
     try {
       if (map.getSource('ump-extrude')) {
@@ -653,12 +661,12 @@ export function Canvas() {
             'fill-extrusion-color': ['get', 'color'],
             'fill-extrusion-height': ['get', 'height'],
             'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.8,
+            'fill-extrusion-opacity': 0.85,
           },
         })
       }
     } catch { /* style not ready */ }
-  }, [features])
+  }, [features, mode3D])
 
   // ── Pan/zoom control per tool ─────────────────────────────────────────────
   useEffect(() => {
@@ -1689,21 +1697,18 @@ export function Canvas() {
 
     // Trees
     if (elId === 'tree' || elId === 'storm-tree-pit') {
-      const r = 10
+      const lat = (f.geometry as GeoJSON.Point).coordinates[1]
+      const canopyDiameterFt = (f.properties.canopyDiameter ?? 20) as number
+      const r = Math.max(5, feetToPixels(map!, canopyDiameterFt / 2, lat))
+      const lobe = r * 0.45
       return (
         <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-          {/* Trunk shadow */}
           <circle cx={px+1} cy={py+1} r={r} fill="rgba(0,0,0,0.15)" />
-          {/* Main canopy */}
           <circle cx={px} cy={py} r={r} fill={fill} fillOpacity={0.85} />
-          {/* Highlight lobes for organic feel */}
-          <circle cx={px-3} cy={py-3} r={5} fill={fill} fillOpacity={0.6} />
-          <circle cx={px+4} cy={py-2} r={4} fill={fill} fillOpacity={0.5} />
-          <circle cx={px+1} cy={py+4} r={4} fill={fill} fillOpacity={0.5} />
-          {/* Canopy highlight */}
-          <circle cx={px-2} cy={py-2} r={3} fill="rgba(255,255,255,0.2)" />
-          {/* Trunk dot */}
-          <circle cx={px} cy={py+r-2} r={1.5} fill="rgba(0,0,0,0.4)" />
+          <circle cx={px-lobe} cy={py-lobe} r={lobe} fill={fill} fillOpacity={0.6} />
+          <circle cx={px+lobe} cy={py-lobe*0.7} r={lobe*0.85} fill={fill} fillOpacity={0.5} />
+          <circle cx={px+lobe*0.2} cy={py+lobe} r={lobe*0.85} fill={fill} fillOpacity={0.5} />
+          <circle cx={px-lobe*0.5} cy={py-lobe*0.5} r={lobe*0.6} fill="rgba(255,255,255,0.2)" />
           <circle cx={px} cy={py} r={r} fill="none" stroke={strokeColor} strokeWidth={sw*0.5} />
           {isSelected && <circle cx={px} cy={py} r={r+4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />}
         </g>
@@ -1971,15 +1976,28 @@ export function Canvas() {
       )
     }
     if (elId === 'tennis-court') {
-      const sm = w * 0.055
+      // Landscape: width=120ft (court length), height=60ft (court width)
+      // Net runs vertically at cx; baselines are vertical at ~17.5% from each end
+      // Singles sidelines horizontal at ~20% from each side
+      // Service lines vertical at ~32.5% from each end; center T horizontal at cy
+      const bl = w * 0.175  // baseline offset from edge
+      const sl = w * 0.325  // service line offset from edge
+      const sw2 = h * 0.20  // sideline margin from edge
       return (
         <g style={s}>
-          <line x1={left} y1={cy2} x2={left + w} y2={cy2} stroke="white" strokeWidth={2} opacity={0.9} />
-          <line x1={cx2} y1={top + h * 0.12} x2={cx2} y2={top + h * 0.88} stroke="white" strokeWidth={1.5} opacity={0.85} />
-          <line x1={left + sm} y1={top + h * 0.35} x2={left + w - sm} y2={top + h * 0.35} stroke="white" strokeWidth={1.5} opacity={0.85} />
-          <line x1={left + sm} y1={top + h * 0.65} x2={left + w - sm} y2={top + h * 0.65} stroke="white" strokeWidth={1.5} opacity={0.85} />
-          <line x1={left + sm} y1={top} x2={left + sm} y2={top + h} stroke="white" strokeWidth={1} opacity={0.6} />
-          <line x1={left + w - sm} y1={top} x2={left + w - sm} y2={top + h} stroke="white" strokeWidth={1} opacity={0.6} />
+          {/* Singles sidelines - horizontal */}
+          <line x1={left + bl} y1={top + sw2} x2={left + w - bl} y2={top + sw2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + bl} y1={top + h - sw2} x2={left + w - bl} y2={top + h - sw2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          {/* Baselines - vertical */}
+          <line x1={left + bl} y1={top + sw2} x2={left + bl} y2={top + h - sw2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + w - bl} y1={top + sw2} x2={left + w - bl} y2={top + h - sw2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          {/* Service lines - vertical */}
+          <line x1={left + sl} y1={top + sw2} x2={left + sl} y2={top + h - sw2} stroke="white" strokeWidth={1.2} opacity={0.8} />
+          <line x1={left + w - sl} y1={top + sw2} x2={left + w - sl} y2={top + h - sw2} stroke="white" strokeWidth={1.2} opacity={0.8} />
+          {/* Net - vertical at center */}
+          <line x1={cx2} y1={top + sw2} x2={cx2} y2={top + h - sw2} stroke="white" strokeWidth={2.5} opacity={0.95} />
+          {/* Center T - horizontal between service lines */}
+          <line x1={left + sl} y1={cy2} x2={left + w - sl} y2={cy2} stroke="white" strokeWidth={1.2} opacity={0.8} />
         </g>
       )
     }
@@ -1995,11 +2013,24 @@ export function Canvas() {
       )
     }
     if (elId === 'volleyball-court') {
+      // Landscape: width=80ft (court length 59ft + margins), height=50ft (court width 29.5ft + margins)
+      // Net runs vertically at cx; court boundary inside run-off
+      // Attack lines are 10ft from net on each side
+      const em = w * 0.13   // end margin (10.5/80)
+      const sm2 = h * 0.205  // side margin (10.25/50)
+      const atk = w * 0.125  // attack line offset from center (10/80)
       return (
         <g style={s}>
-          <line x1={left} y1={cy2} x2={left + w} y2={cy2} stroke="white" strokeWidth={2.5} opacity={0.9} />
-          <line x1={left} y1={cy2 - h * 0.28} x2={left + w} y2={cy2 - h * 0.28} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
-          <line x1={left} y1={cy2 + h * 0.28} x2={left + w} y2={cy2 + h * 0.28} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
+          {/* Court boundary */}
+          <line x1={left + em} y1={top + sm2} x2={left + w - em} y2={top + sm2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + em} y1={top + h - sm2} x2={left + w - em} y2={top + h - sm2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + em} y1={top + sm2} x2={left + em} y2={top + h - sm2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          <line x1={left + w - em} y1={top + sm2} x2={left + w - em} y2={top + h - sm2} stroke="white" strokeWidth={1.5} opacity={0.85} />
+          {/* Net - vertical at center */}
+          <line x1={cx2} y1={top + sm2} x2={cx2} y2={top + h - sm2} stroke="white" strokeWidth={2.5} opacity={0.95} />
+          {/* Attack lines - dashed, vertical */}
+          <line x1={cx2 - atk} y1={top + sm2} x2={cx2 - atk} y2={top + h - sm2} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.75} />
+          <line x1={cx2 + atk} y1={top + sm2} x2={cx2 + atk} y2={top + h - sm2} stroke="white" strokeWidth={1.5} strokeDasharray="6 4" opacity={0.75} />
         </g>
       )
     }
@@ -2244,24 +2275,15 @@ export function Canvas() {
         const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
         const totalWidthFt = lanes.reduce((s, l) => s + l.width, 0)
         const totalPx = Math.max(4, feetToPixels(map, totalWidthFt, avgLat))
-        const screenPts = coords.map(c => lngLatToScreen(map, c) as [number,number])
-        let cumPx = -totalPx / 2
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
             {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={totalPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
-            {/* Curb/gutter base */}
+            {/* Curb/gutter outer edge */}
             <path d={path} fill="none" stroke="#1a1a1a" strokeWidth={totalPx + 2} strokeLinecap="butt" strokeLinejoin="round" />
-            {/* Colored lane strips */}
-            {lanes.map((lane, i) => {
-              const lanePx = feetToPixels(map, lane.width, avgLat)
-              const centerOff = cumPx + lanePx / 2
-              cumPx += lanePx
-              const offPts = offsetPolylinePoints(screenPts, centerOff)
-              const laneD = offPts.map((p, j) => `${j===0?'M':'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ')
-              return <path key={i} d={laneD} fill="none" stroke={lane.color} strokeWidth={lanePx} strokeLinecap="butt" strokeLinejoin="round" />
-            })}
-            {/* Lane dividers */}
-            <path d={path} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.75} strokeLinecap="round" strokeDasharray="10 7" />
+            {/* Road surface */}
+            <path d={path} fill="none" stroke="#374151" strokeWidth={totalPx} strokeLinecap="butt" strokeLinejoin="round" />
+            {/* Center line dashes */}
+            <path d={path} fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth={0.75} strokeDasharray="12 8" strokeLinecap="round" />
           </g>
         )
       }
@@ -2295,59 +2317,14 @@ export function Canvas() {
 
       // ── Building rendering ──
       if (f.properties.category === 'buildings' && !isLine && f.geometry.type === 'Polygon') {
-        const fillC = style.fillColor ?? '#334155'
-        const fillO = (style.fillOpacity ?? 100) / 100
-        const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
-        if (coords.length >= 4) {
-          const pts = coords.map(c => lngLatToScreen(map, c))
-          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
-          const bx = Math.min(...xs), by = Math.min(...ys)
-          const bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by
-          const m = Math.min(bw, bh) * 0.1
-          const parapetPath = path // reuse
-          return (
-            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-              {/* Ground shadow */}
-              <path d={path} fill="rgba(0,0,0,0.22)" transform="translate(3,5)" />
-              {/* Building body */}
-              <path d={path} fill={fillC} fillOpacity={fillO} />
-              {/* Roof plane (lighter center) */}
-              {bw > 16 && bh > 16 && (
-                <path d={parapetPath} fill="white" fillOpacity={0.08} />
-              )}
-              {/* Parapet / roof edge (inset stroke) */}
-              {bw > 16 && bh > 16 && (
-                <path d={path} fill="none"
-                  stroke="rgba(255,255,255,0.18)" strokeWidth={Math.max(1.5, m * 0.5)}
-                  strokeLinejoin="round"
-                  style={{ clipPath: `inset(0)` }} />
-              )}
-              {/* Window grid hint at larger sizes */}
-              {bw > 30 && bh > 30 && (() => {
-                const cols = Math.max(2, Math.floor(bw / 12))
-                const rows = Math.max(2, Math.floor(bh / 14))
-                const windows = []
-                for (let r = 0; r < rows; r++) {
-                  for (let c = 0; c < cols; c++) {
-                    const wx = bx + m + (c / cols) * (bw - 2*m) + 1
-                    const wy = by + m + (r / rows) * (bh - 2*m) + 2
-                    const ww = (bw - 2*m) / cols - 3
-                    const wh = (bh - 2*m) / rows - 4
-                    if (ww > 2 && wh > 2) windows.push(
-                      <rect key={`${r}-${c}`} x={wx} y={wy} width={ww} height={wh}
-                        fill="rgba(200,230,255,0.12)" rx={0.5} />
-                    )
-                  }
-                }
-                return <>{windows}</>
-              })()}
-              {/* Outer stroke */}
-              <path d={path} fill="none" stroke={isSelected ? selColor : strokeColor}
-                strokeWidth={isSelected ? sw + 1.5 : sw} strokeLinejoin="round" />
-              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 5} strokeOpacity={0.25} strokeLinejoin="round" />}
-            </g>
-          )
-        }
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <path d={path} fill="#FFFFFF" fillOpacity={0.95} />
+            <path d={path} fill="none" stroke={isSelected ? selColor : '#000000'}
+              strokeWidth={isSelected ? sw + 1.5 : sw} strokeLinejoin="round" />
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 5} strokeOpacity={0.25} strokeLinejoin="round" />}
+          </g>
+        )
       }
 
       // ── Building/polygon shadow ──
