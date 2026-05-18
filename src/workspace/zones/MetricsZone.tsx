@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { ZoneHeader } from '../components/ZoneHeader'
 import { useUIStore } from '../../store/uiStore'
 import { useCanvasStore } from '../../store/canvasStore'
@@ -7,16 +7,6 @@ import {
   polygonAreaSqFt, lineStringLengthFt,
   sqFtToAcres, sqFtToHa, ftToM, fmtNum,
 } from '../../utils/geoUtils'
-
-type Phase = 'all' | 'existing' | 'phase-1' | 'phase-2' | 'phase-3'
-
-const PHASE_TABS: Array<{ id: Phase; label: string; color: string }> = [
-  { id: 'all',      label: 'All',  color: '#6366F1' },
-  { id: 'existing', label: 'Exist',color: '#64748B' },
-  { id: 'phase-1',  label: 'Ph1',  color: '#22C55E' },
-  { id: 'phase-2',  label: 'Ph2',  color: '#F59E0B' },
-  { id: 'phase-3',  label: 'Ph3',  color: '#EF4444' },
-]
 
 function getPolygonCoords(geometry: GeoJSON.Geometry): number[][] | null {
   if (geometry.type === 'Polygon') return geometry.coordinates[0]
@@ -56,81 +46,84 @@ function exportMetricsCSV(features: import('../../store/canvasStore').UMPFeature
   URL.revokeObjectURL(url)
 }
 
+const GREEN_CATS = ['landscape', 'parks', 'planting', 'green-infra']
+const ROAD_CATS = ['streets']
+const BUILDING_CATS = ['buildings']
+const TREE_IDS = ['tree', 'street-tree']
+const PARKING_CATS = ['parking']
+
 export function MetricsZone() {
   const { zoneCollapsed, toggleZone, units } = useUIStore()
   const { features } = useCanvasStore()
   const { projectName } = useProjectStore()
-  const [phase, setPhase] = useState<Phase>('all')
   const collapsed = zoneCollapsed['metrics']
 
-  const filtered = useMemo(() => {
-    if (phase === 'all') return features
-    return features.filter(f => f.properties.phase === phase)
-  }, [features, phase])
-
   const metrics = useMemo(() => {
-    let totalAreaSqFt = 0
-    let totalLineFt = 0
-    let pointCount = 0
-    let polyCount = 0
-    let lineCount = 0
+    let totalAreaSqFt = 0, buildingAreaSqFt = 0, greenAreaSqFt = 0
+    let totalLineFt = 0, roadLenFt = 0
+    let pointCount = 0, treeCount = 0, parkingCount = 0, total = 0
 
-    filtered.forEach(f => {
+    features.forEach(f => {
+      total++
       const geom = f.geometry
+      const cat = f.properties.category ?? ''
+      const elType = f.properties.elementType ?? ''
+
       const coords = getPolygonCoords(geom)
       if (coords) {
-        totalAreaSqFt += polygonAreaSqFt(coords)
-        polyCount++
+        const a = polygonAreaSqFt(coords)
+        totalAreaSqFt += a
+        if (BUILDING_CATS.includes(cat)) buildingAreaSqFt += a
+        if (GREEN_CATS.includes(cat)) greenAreaSqFt += a
       }
       const lcoords = getLineCoords(geom)
       if (lcoords) {
-        totalLineFt += lineStringLengthFt(lcoords)
-        lineCount++
+        const l = lineStringLengthFt(lcoords)
+        totalLineFt += l
+        if (ROAD_CATS.includes(cat)) roadLenFt += l
       }
-      if (geom.type === 'Point' || geom.type === 'MultiPoint') pointCount++
+      if (geom.type === 'Point' || geom.type === 'MultiPoint') {
+        pointCount++
+        if (TREE_IDS.includes(elType)) treeCount++
+      }
+      if (PARKING_CATS.includes(cat)) parkingCount++
     })
 
-    return { totalAreaSqFt, totalLineFt, pointCount, polyCount, lineCount, total: filtered.length }
-  }, [filtered])
+    return { total, totalAreaSqFt, buildingAreaSqFt, greenAreaSqFt, totalLineFt, roadLenFt, pointCount, treeCount, parkingCount }
+  }, [features])
 
-  // Format based on unit preference
-  const areaDisplay = units === 'm'
-    ? { value: fmtNum(sqFtToHa(metrics.totalAreaSqFt), 2), unit: 'ha' }
-    : { value: fmtNum(sqFtToAcres(metrics.totalAreaSqFt), 2), unit: 'ac' }
+  function fmtArea(sqFt: number) {
+    return units === 'm'
+      ? { value: fmtNum(sqFtToHa(sqFt), 2), unit: 'ha' }
+      : { value: fmtNum(sqFtToAcres(sqFt), 2), unit: 'ac' }
+  }
+  function fmtLen(ft: number) {
+    return units === 'm'
+      ? { value: fmtNum(ftToM(ft), 0), unit: 'm' }
+      : { value: fmtNum(ft, 0), unit: 'ft' }
+  }
 
-  const lengthDisplay = units === 'm'
-    ? { value: fmtNum(ftToM(metrics.totalLineFt)), unit: 'm' }
-    : { value: fmtNum(metrics.totalLineFt), unit: 'ft' }
+  const buildA = fmtArea(metrics.buildingAreaSqFt)
+  const greenA = fmtArea(metrics.greenAreaSqFt)
+  const roadL = fmtLen(metrics.roadLenFt)
 
   const rows = [
-    { label: 'Total Features', value: fmtNum(metrics.total), unit: '' },
-    { label: 'Polygons / Area', value: `${metrics.polyCount} / ${areaDisplay.value}`, unit: areaDisplay.unit },
-    { label: 'Lines / Length',  value: `${metrics.lineCount} / ${lengthDisplay.value}`, unit: lengthDisplay.unit },
-    { label: 'Points / Objects',value: fmtNum(metrics.pointCount), unit: '' },
+    { label: 'Total Elements', value: fmtNum(metrics.total), unit: '', color: 'var(--color-text)' },
+    { label: 'Building Footprint', value: buildA.value, unit: buildA.unit, color: '#94A3B8' },
+    { label: 'Green / Open Space', value: greenA.value, unit: greenA.unit, color: '#4ADE80' },
+    { label: 'Road Network', value: roadL.value, unit: roadL.unit, color: '#FBBF24' },
+    { label: 'Trees', value: fmtNum(metrics.treeCount), unit: '', color: '#22C55E' },
+    { label: 'Parking Areas', value: fmtNum(metrics.parkingCount), unit: '', color: '#60A5FA' },
   ]
 
   return (
     <ZoneHeader label="Metrics" collapsed={collapsed} onToggle={() => toggleZone('metrics')}>
-      {/* Phase tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', padding: '4px 8px', gap: 4 }}>
-        {PHASE_TABS.map(tab => (
-          <button key={tab.id} onClick={() => setPhase(tab.id)} style={{
-            flex: 1, height: 22, fontSize: 10, fontWeight: phase === tab.id ? 700 : 400,
-            borderRadius: 3, border: `1px solid ${phase === tab.id ? tab.color : 'var(--color-border)'}`,
-            background: phase === tab.id ? `${tab.color}18` : 'transparent',
-            color: phase === tab.id ? tab.color : 'var(--color-text-sec)', cursor: 'pointer',
-          }}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {/* Live metric rows */}
-      <div style={{ padding: '6px 0', overflowY: 'auto', maxHeight: 180 }}>
+      <div style={{ padding: '6px 0', overflowY: 'auto', maxHeight: 240 }}>
         {rows.map(r => (
           <div key={r.label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '3px 12px' }}>
             <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{r.label}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'baseline', gap: 2 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: r.color, display: 'flex', alignItems: 'baseline', gap: 2 }}>
               {r.value}
               {r.unit && <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--color-text-muted)' }}>{r.unit}</span>}
             </span>
@@ -139,7 +132,7 @@ export function MetricsZone() {
 
         {/* Per-category breakdown */}
         {metrics.total > 0 && (
-          <CategoryBreakdown features={filtered} />
+          <CategoryBreakdown features={features} />
         )}
       </div>
 
@@ -152,7 +145,7 @@ export function MetricsZone() {
 
       <div style={{ padding: '6px 10px', borderTop: '1px solid var(--color-border)' }}>
         <button
-          onClick={() => exportMetricsCSV(filtered, projectName, units)}
+          onClick={() => exportMetricsCSV(features, projectName, units)}
           disabled={metrics.total === 0}
           style={{
             width: '100%', height: 26, fontSize: 11, fontWeight: 500, borderRadius: 4,

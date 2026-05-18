@@ -96,25 +96,63 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
 
   // ── Street sections ─ plan-view road ─────────────────────────────────────
   if (cat === 'streets') {
-    const roadW = id === 'highway' ? 26 : id === 'arterial' ? 22 : id === 'collector-street' ? 18 : id === 'alley' ? 10 : 16
+    const isPed = id === 'ped-street'
+    if (isPed) {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#E2E8F0" />
+          <rect x="8" y="0" width="28" height="44" fill="#F0FDF4" />
+          <line x1="8" y1="0" x2="8" y2="44" stroke="#CBD5E1" strokeWidth="1" />
+          <line x1="36" y1="0" x2="36" y2="44" stroke="#CBD5E1" strokeWidth="1" />
+          {[6, 14, 22, 30, 38].map(y => (
+            <circle key={y} cx="22" cy={y} r="1.5" fill="#9CA3AF" opacity="0.6" />
+          ))}
+        </svg>
+      )
+    }
+    const isHighway = id === 'highway'
+    const isArterial = id === 'arterial'
+    const isCollector = id === 'collector-street'
+    const isLocal = id === 'local-street'
+    const roadW = isHighway ? 30 : isArterial ? 26 : isCollector ? 22 : isLocal ? 18 : 14
+    const sidewalkW = isHighway ? 3 : 3
     const y1 = (44 - roadW) / 2
     const y2 = y1 + roadW
-    const hasMedian = id === 'arterial' || id === 'highway'
-    const isBike = id === 'bike-lane'
-    const isPed = id === 'ped-street'
-    const isShared = id === 'shared-path'
+    const laneW = isHighway ? 5 : isArterial ? 5 : 6
+    const numLanes = isHighway ? 3 : isArterial ? 2 : isCollector ? 1 : 1
+    const hasMedian = isHighway || isArterial
+    const medianW = isHighway ? 4 : 2
+    const hasBike = isArterial
+    const bikeW = 2.5
     return (
       <svg width="44" height="44" viewBox="0 0 44 44">
-        <rect width="44" height="44" rx="4" fill="#4B5563" />
-        <rect x="0" y={y1} width="44" height={roadW} fill={isBike ? '#052E16' : isPed || isShared ? '#374151' : '#1F2937'} />
-        {hasMedian && <rect x="0" y={22 - 2} width="44" height="4" fill="#374151" />}
-        <line x1="0" y1={y1} x2="44" y2={y1} stroke="#9CA3AF" strokeWidth="0.8" />
-        <line x1="0" y1={y2} x2="44" y2={y2} stroke="#9CA3AF" strokeWidth="0.8" />
-        {isBike
-          ? <line x1="0" y1="22" x2="44" y2="22" stroke="#16A34A" strokeWidth="1.5" strokeDasharray="6 3" />
-          : isPed || isShared
-            ? <line x1="0" y1="22" x2="44" y2="22" stroke="#D1D5DB" strokeWidth="0.8" strokeDasharray="4 3" />
-            : <line x1="0" y1="22" x2="44" y2="22" stroke="#FBBF24" strokeWidth="0.8" strokeDasharray="5 4" />}
+        {/* Sidewalk/shoulder */}
+        <rect width="44" height="44" rx="4" fill="#CBD5E1" />
+        {/* Road surface */}
+        <rect x="0" y={y1} width="44" height={roadW} fill="#374155" />
+        {/* Bike lanes */}
+        {hasBike && <>
+          <rect x="0" y={y1} width="44" height={bikeW} fill="#166534" opacity="0.8" />
+          <rect x="0" y={y2 - bikeW} width="44" height={bikeW} fill="#166534" opacity="0.8" />
+          <line x1="0" y1={y1 + bikeW} x2="44" y2={y1 + bikeW} stroke="white" strokeWidth="0.6" opacity="0.5" />
+          <line x1="0" y1={y2 - bikeW} x2="44" y2={y2 - bikeW} stroke="white" strokeWidth="0.6" opacity="0.5" />
+        </>}
+        {/* Median */}
+        {hasMedian && <rect x="0" y={22 - medianW / 2} width="44" height={medianW} fill="#1A472A" />}
+        {/* Lane dividers */}
+        {Array.from({ length: numLanes - 1 }).map((_, i) => {
+          const off = hasBike ? bikeW : 0
+          const laneY = y1 + off + laneW * (i + 1) + (hasMedian && i >= numLanes / 2 - 1 ? medianW : 0)
+          return <line key={i} x1="0" y1={laneY} x2="44" y2={laneY} stroke="#FBBF24" strokeWidth="0.6" strokeDasharray="5 4" opacity="0.7" />
+        })}
+        {/* Center line */}
+        {!hasMedian && <line x1="0" y1="22" x2="44" y2="22" stroke="#FBBF24" strokeWidth="0.7" strokeDasharray="5 4" opacity="0.8" />}
+        {/* Curb lines */}
+        <line x1="0" y1={y1} x2="44" y2={y1} stroke="#94A3B8" strokeWidth="0.8" />
+        <line x1="0" y1={y2} x2="44" y2={y2} stroke="#94A3B8" strokeWidth="0.8" />
+        {/* Sidewalk indicators */}
+        <line x1="0" y1={y1 - sidewalkW} x2="44" y2={y1 - sidewalkW} stroke="#94A3B8" strokeWidth="0.5" opacity="0.5" />
+        <line x1="0" y1={y2 + sidewalkW} x2="44" y2={y2 + sidewalkW} stroke="#94A3B8" strokeWidth="0.5" opacity="0.5" />
       </svg>
     )
   }
@@ -141,11 +179,26 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
       )
     }
     if (id.includes('stop-sign') || id === 'yield-sign') {
+      const isYield = id === 'yield-sign'
+      if (isYield) {
+        return (
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <rect width="44" height="44" rx="4" fill="#374151" />
+            <polygon points="22,8 38,36 6,36" fill="#DC2626" />
+            <polygon points="22,14 33,33 11,33" fill="none" stroke="white" strokeWidth="1.5" />
+            <text x="22" y="30" textAnchor="middle" fontSize="6" fontWeight="900" fill="white" fontFamily="sans-serif">YIELD</text>
+            <line x1="22" y1="44" x2="22" y2="36" stroke="#6B7280" strokeWidth="1.5" />
+          </svg>
+        )
+      }
       return (
         <svg width="44" height="44" viewBox="0 0 44 44">
           <rect width="44" height="44" rx="4" fill="#374151" />
-          <polygon points="22,6 31,10 36,19 36,25 31,34 22,38 13,34 8,25 8,19 13,10" fill="#DC2626" />
-          <text x="22" y="26" textAnchor="middle" fontSize="8" fontWeight="900" fill="white" fontFamily="sans-serif">STOP</text>
+          {/* Octagon stop sign */}
+          <polygon points="22,5 30,8 36,14 36,22 33,30 27,36 17,36 11,30 8,22 8,14 14,8" fill="#CC0000" />
+          <polygon points="22,7 29,10 34,15 34,22 31,29 26,34 18,34 13,29 10,22 10,15 15,10" fill="none" stroke="white" strokeWidth="1" opacity="0.9" />
+          <text x="22" y="25" textAnchor="middle" fontSize="8.5" fontWeight="900" fill="white" fontFamily="Impact, Arial Narrow, sans-serif" letterSpacing="0.5">STOP</text>
+          <line x1="22" y1="44" x2="22" y2="36" stroke="#6B7280" strokeWidth="1.5" />
         </svg>
       )
     }
@@ -783,58 +836,72 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
     )
   }
 
-  // ── Actors ─────────────────────────────────────────────────────────────
+  // ── Actors (plan view / top-down) ─────────────────────────────────────
   if (cat === 'actors') {
     if (id === 'car' || id === 'delivery-vehicle' || id === 'bus-vehicle') {
-      const carC = fillC
       const isLong = id === 'bus-vehicle' || id === 'delivery-vehicle'
-      const cw = isLong ? 30 : 22
-      const ch = isLong ? 12 : 14
+      const cw = isLong ? 28 : 18
+      const ch = isLong ? 12 : 10
       const cx = (44 - cw) / 2
       const cy = (44 - ch) / 2
       return (
         <svg width="44" height="44" viewBox="0 0 44 44">
-          <rect width="44" height="44" rx="4" fill="#374151" />
-          <rect x={cx} y={cy} width={cw} height={ch} rx="3" fill={carC} opacity="0.9" />
-          <circle cx={cx + 4} cy={cy + ch} r="3.5" fill="#1F2937" />
-          <circle cx={cx + cw - 4} cy={cy + ch} r="3.5" fill="#1F2937" />
-          {isLong && <circle cx={cx + cw / 2} cy={cy + ch} r="3.5" fill="#1F2937" />}
-          <rect x={cx + 2} y={cy + 2} width={cw - 4} height={ch * 0.45} rx="1.5" fill="rgba(255,255,255,0.3)" />
+          <rect width="44" height="44" rx="4" fill="#1E293B" />
+          {/* Plan-view car: body */}
+          <rect x={cx} y={cy} width={cw} height={ch} rx="2" fill={fillC} opacity="0.95" />
+          {/* Windshield */}
+          <rect x={cx + 2} y={cy + 1} width={cw - 4} height={ch * 0.35} rx="1" fill="rgba(186,230,253,0.6)" />
+          {/* Wheels */}
+          <rect x={cx - 1.5} y={cy + 1} width="3" height={ch * 0.38} rx="1" fill="#0F172A" />
+          <rect x={cx + cw - 1.5} y={cy + 1} width="3" height={ch * 0.38} rx="1" fill="#0F172A" />
+          <rect x={cx - 1.5} y={cy + ch - ch * 0.38 - 1} width="3" height={ch * 0.38} rx="1" fill="#0F172A" />
+          <rect x={cx + cw - 1.5} y={cy + ch - ch * 0.38 - 1} width="3" height={ch * 0.38} rx="1" fill="#0F172A" />
+          {/* Direction arrow */}
+          <polygon points={`${22},${cy - 4} ${20},${cy - 1} ${24},${cy - 1}`} fill={fillC} opacity="0.6" />
         </svg>
       )
     }
     if (id === 'bicyclist' || id === 'scooter-rider') {
       return (
         <svg width="44" height="44" viewBox="0 0 44 44">
-          <rect width="44" height="44" rx="4" fill="#374151" />
-          <circle cx="15" cy="28" r="7" fill="none" stroke={fillC} strokeWidth="2" />
-          <circle cx="29" cy="28" r="7" fill="none" stroke={fillC} strokeWidth="2" />
-          <line x1="15" y1="21" x2="22" y2="14" stroke={fillC} strokeWidth="1.5" />
-          <line x1="22" y1="14" x2="29" y2="21" stroke={fillC} strokeWidth="1.5" />
-          <circle cx="22" cy="12" r="3.5" fill={fillC} opacity="0.8" />
+          <rect width="44" height="44" rx="4" fill="#1E293B" />
+          {/* Plan view: two wheels top-down */}
+          <ellipse cx="17" cy="22" rx="5" ry="8" fill="none" stroke={fillC} strokeWidth="2" />
+          <ellipse cx="27" cy="22" rx="5" ry="8" fill="none" stroke={fillC} strokeWidth="2" />
+          {/* Frame */}
+          <line x1="17" y1="22" x2="27" y2="22" stroke={fillC} strokeWidth="1.5" />
+          <line x1="22" y1="22" x2="22" y2="16" stroke={fillC} strokeWidth="1.5" />
+          {/* Rider body */}
+          <ellipse cx="22" cy="18" rx="3.5" ry="4" fill={fillC} opacity="0.7" />
         </svg>
       )
     }
     if (id === 'wheelchair-user') {
       return (
         <svg width="44" height="44" viewBox="0 0 44 44">
-          <rect width="44" height="44" rx="4" fill="#374151" />
-          <circle cx="22" cy="12" r="4" fill={fillC} opacity="0.8" />
-          <line x1="22" y1="16" x2="22" y2="26" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
-          <line x1="22" y1="22" x2="30" y2="22" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
-          <circle cx="24" cy="32" r="7" fill="none" stroke={fillC} strokeWidth="2" />
+          <rect width="44" height="44" rx="4" fill="#1E293B" />
+          {/* Plan view wheelchair: large wheel circles + person body */}
+          <circle cx="22" cy="24" r="11" fill="none" stroke={fillC} strokeWidth="2" />
+          <circle cx="22" cy="24" r="5" fill={fillC} opacity="0.3" />
+          <line x1="11" y1="24" x2="33" y2="24" stroke={fillC} strokeWidth="1" opacity="0.5" />
+          <line x1="22" y1="13" x2="22" y2="35" stroke={fillC} strokeWidth="1" opacity="0.5" />
+          {/* Person head */}
+          <circle cx="22" cy="14" r="3.5" fill={fillC} opacity="0.9" />
         </svg>
       )
     }
-    // Default pedestrian / actor
+    // Default pedestrian plan view
     return (
       <svg width="44" height="44" viewBox="0 0 44 44">
-        <rect width="44" height="44" rx="4" fill="#374151" />
-        <circle cx="22" cy="12" r="4.5" fill={fillC} opacity="0.85" />
-        <line x1="22" y1="17" x2="22" y2="29" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
-        <line x1="14" y1="22" x2="30" y2="22" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
-        <line x1="22" y1="29" x2="16" y2="38" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
-        <line x1="22" y1="29" x2="28" y2="38" stroke={fillC} strokeWidth="2" strokeLinecap="round" />
+        <rect width="44" height="44" rx="4" fill="#1E293B" />
+        {/* Plan-view person: circle body with direction notch */}
+        <circle cx="22" cy="23" r="9" fill={fillC} opacity="0.85" />
+        <circle cx="22" cy="23" r="9" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1" />
+        {/* Head */}
+        <circle cx="22" cy="14" r="4" fill={fillC} opacity="0.95" />
+        {/* Arms */}
+        <line x1="13" y1="22" x2="22" y2="22" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" />
+        <line x1="22" y1="22" x2="31" y2="22" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     )
   }

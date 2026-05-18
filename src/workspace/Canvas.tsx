@@ -14,6 +14,7 @@ import {
   lngLatToScreen, screenToLngLat, feetToPixels, haversineFt, fmtDist,
   distToSegment, pointInPolygon, screenBbox,
 } from '../utils/geo'
+import { polygonAreaSqFt, lineStringLengthFt } from '../utils/geoUtils'
 
 const INITIAL_CENTER: [number, number] = [-87.6298, 41.8781]
 const INITIAL_ZOOM = 15
@@ -502,6 +503,10 @@ export function Canvas() {
   useEffect(() => { snapTargetRef.current = snapTarget }, [snapTarget])
   useEffect(() => { measurePtsRef.current = measurePts }, [measurePts])
 
+  const mode3DRef = useRef(mode3D)
+  useEffect(() => { mode3DRef.current = mode3D }, [mode3D])
+  const rotateStartRef = useRef<{ x: number; y: number; bearing: number; pitch: number } | null>(null)
+
   // Extrude sync
   useEffect(() => {
     if (activeTool === 'extrude' && selectedIds.length === 1) {
@@ -518,7 +523,6 @@ export function Canvas() {
     mapboxgl.accessToken = token
 
     let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
 
     function createMap(center: [number, number], zoom: number) {
       if (cancelled || !mapContainerRef.current) return
@@ -559,27 +563,20 @@ export function Canvas() {
       mapRef.current = map
     }
 
+    createMap([-96, 38], 4)
     if (navigator.geolocation) {
-      // Wait up to 3s for location; fall back to a world view
-      timer = setTimeout(() => createMap([-96, 38], 4), 3000)
       navigator.geolocation.getCurrentPosition(
         pos => {
-          if (timer) clearTimeout(timer)
-          createMap([pos.coords.longitude, pos.coords.latitude], 15)
+          const m = mapRef.current
+          if (m) m.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 })
         },
-        () => {
-          if (timer) clearTimeout(timer)
-          createMap([-96, 38], 4)
-        },
-        { timeout: 3000, maximumAge: 300000 },
+        () => { /* keep world view */ },
+        { timeout: 10000, maximumAge: 300000 },
       )
-    } else {
-      createMap([-96, 38], 4)
     }
 
     return () => {
       cancelled = true
-      if (timer) clearTimeout(timer)
       mapRef.current?.remove()
       mapRef.current = null
       setMapInstance(null)
@@ -663,6 +660,10 @@ export function Canvas() {
             'fill-extrusion-base': 0,
             'fill-extrusion-opacity': 0.85,
           },
+        })
+        map.addLayer({
+          id: 'ump-extrude-outline', type: 'line', source: 'ump-extrude',
+          paint: { 'line-color': '#000000', 'line-width': 1.5, 'line-opacity': 0.7 },
         })
       }
     } catch { /* style not ready */ }
@@ -846,6 +847,13 @@ export function Canvas() {
       return
     }
 
+    // ── Ctrl+drag in 3D mode: bearing/pitch control ──
+    if (mode3DRef.current && e.ctrlKey) {
+      const m = mapRef.current
+      if (m) rotateStartRef.current = { x: e.clientX, y: e.clientY, bearing: m.getBearing(), pitch: m.getPitch() }
+      return
+    }
+
     // ── Marquee tool: always start marquee selection ──
     if (tool === 'marquee') {
       setMarquee({ x1: sx, y1: sy, x2: sx, y2: sy })
@@ -1001,6 +1009,18 @@ export function Canvas() {
     const lngLat = screenToLngLat(map, sx, sy)
     shiftHeldRef.current = e.shiftKey
     setCursorPos([sx, sy])
+
+    // ── 3D rotation tracking (Ctrl+drag) ──
+    if (rotateStartRef.current) {
+      const m = mapRef.current
+      if (m) {
+        const dx = e.clientX - rotateStartRef.current.x
+        const dy = e.clientY - rotateStartRef.current.y
+        m.setBearing(rotateStartRef.current.bearing + dx * 0.4)
+        m.setPitch(Math.max(0, Math.min(80, rotateStartRef.current.pitch - dy * 0.3)))
+      }
+      return
+    }
 
     // Manual pan when dragging empty space (select tool) or space held
     if (panStartRef.current && (spaceHeldRef.current || activeToolRef.current === 'select' || activeToolRef.current === 'direct')) {
@@ -1172,8 +1192,9 @@ export function Canvas() {
     if (!map) return
     const [sx, sy] = getCanvasXY(e)
 
-    // Clear select-tool pan
+    // Clear select-tool pan and 3D rotation
     panStartRef.current = null
+    rotateStartRef.current = null
 
     if (draggingMove) {
       wasDraggingRef.current = true
@@ -2120,6 +2141,25 @@ export function Canvas() {
             </text>
           )
         }
+        // Tree shadow
+        if (showShadowPanel && (f.properties.elementType === 'tree' || f.properties.elementType === 'street-tree')) {
+          const treeHM = 6 // ~20ft mature tree height in meters
+          const shadowFactor = shadowAltitude > 0.05 ? 1 / Math.tan(shadowAltitude) : 20
+          const shadowLenFt = treeHM * 3.28084 * shadowFactor * 0.5
+          const coord = f.geometry.coordinates as [number, number]
+          const zoom = (mapRef.current as unknown as { getZoom?: () => number })?.getZoom?.() ?? 15
+          const lenPx = (shadowLenFt / 5280) * (40075016.68 * Math.cos(coord[1] * Math.PI / 180) / Math.pow(2, zoom)) * 256 / (40075016.68 / 5280)
+          const sDx = -Math.sin(shadowAzimuth + Math.PI) * lenPx
+          const sDy = Math.cos(shadowAzimuth + Math.PI) * lenPx
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <ellipse cx={px + sDx} cy={py + sDy} rx={Math.max(6, lenPx * 0.35)} ry={Math.max(4, lenPx * 0.2)}
+                fill="rgba(0,0,0,0.22)"
+                transform={`rotate(${(shadowAzimuth + Math.PI) * 180 / Math.PI},${px + sDx},${py + sDy})`} />
+              {renderPointSymbol(f, px, py, isSelected, isHovered, selColor, strokeColor)}
+            </g>
+          )
+        }
         return renderPointSymbol(f, px, py, isSelected, isHovered, selColor, strokeColor)
       }
 
@@ -2166,7 +2206,50 @@ export function Canvas() {
         )
       }
 
-      // ── Parking space layout ──
+      // ── Parking stalls from drawn line ──
+      if ((f.properties.elementType === 'parallel-parking' || f.properties.elementType === 'head-in-parking') && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        if (coords.length >= 2) {
+          const isParallel = f.properties.elementType === 'parallel-parking'
+          const stallWidthFt = isParallel ? 8 : 9
+          const stallLengthFt = isParallel ? 22 : 18
+          const [x1, y1] = lngLatToScreen(map, coords[0])
+          const [x2, y2] = lngLatToScreen(map, coords[coords.length - 1])
+          const lineLen = Math.hypot(x2 - x1, y2 - y1)
+          if (lineLen > 2) {
+            const ang = Math.atan2(y2 - y1, x2 - x1)
+            const perpAng = ang + Math.PI / 2
+            const stallWidthPx = feetToPixels(map, stallWidthFt, coords[0][1])
+            const stallLengthPx = feetToPixels(map, stallLengthFt, coords[0][1])
+            const numStalls = Math.max(1, Math.floor(lineLen / stallWidthPx))
+            const bx1 = x1 + stallLengthPx * Math.cos(perpAng)
+            const by1 = y1 + stallLengthPx * Math.sin(perpAng)
+            const bx2 = x2 + stallLengthPx * Math.cos(perpAng)
+            const by2 = y2 + stallLengthPx * Math.sin(perpAng)
+            const bgPath = `M${x1},${y1} L${x2},${y2} L${bx2},${by2} L${bx1},${by1} Z`
+            const dividers: React.ReactNode[] = []
+            for (let i = 0; i <= numStalls; i++) {
+              const t = i * stallWidthPx
+              if (t > lineLen + 1) break
+              const fx = x1 + Math.min(t, lineLen) * Math.cos(ang)
+              const fy = y1 + Math.min(t, lineLen) * Math.sin(ang)
+              dividers.push(<line key={i} x1={fx} y1={fy}
+                x2={fx + stallLengthPx * Math.cos(perpAng)} y2={fy + stallLengthPx * Math.sin(perpAng)}
+                stroke="white" strokeWidth={1.2} opacity={0.85} />)
+            }
+            return (
+              <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+                <path d={bgPath} fill="#374151" fillOpacity={0.85} />
+                <line x1={bx1} y1={by1} x2={bx2} y2={by2} stroke="white" strokeWidth={1} opacity={0.5} />
+                {dividers}
+                {isSelected && <path d={bgPath} fill="none" stroke={selColor} strokeWidth={2} strokeOpacity={0.7} />}
+              </g>
+            )
+          }
+        }
+      }
+
+      // ── Parking space layout (polygon) ──
       if ((f.properties.elementType === 'parallel-parking' || f.properties.elementType === 'head-in-parking' || f.properties.elementType === 'diagonal-parking') && f.geometry.type === 'Polygon') {
         const coords = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]
         if (coords.length >= 4) {
@@ -2328,7 +2411,11 @@ export function Canvas() {
       }
 
       // ── Building/polygon shadow ──
-      const extH = style.extrudeHeight ?? 0
+      const explicitExtH = style.extrudeHeight ?? 0
+      const autoExtH = mode3D && f.properties.category === 'buildings' && f.geometry.type === 'Polygon'
+        ? ((f.properties.floors ?? 2) as number) * 3.5
+        : 0
+      const extH = Math.max(explicitExtH, autoExtH)
       if (showShadowPanel && extH > 0 && !isLine && map) {
         const shadowFactor = shadowAltitude > 0.05 ? 1 / Math.tan(shadowAltitude) : 20
         const shadowLengthFt = extH * 3.28084 * shadowFactor * 0.5
@@ -2770,9 +2857,54 @@ export function Canvas() {
         </div>
       )}
 
-      {nightMode && (
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'rgba(10,15,35,0.52)', zIndex: 5 }} />
-      )}
+      {nightMode && (() => {
+        const allEls = ELEMENT_CATEGORIES.flatMap(c => c.elements)
+        const emitterFeats = visibleFeatures.filter(f => {
+          const el = allEls.find(e => e.id === f.properties.elementType) as any
+          return el?.nightModeEmitter
+        })
+        return (
+          <>
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'rgba(10,15,35,0.65)', zIndex: 5 }} />
+            {map && emitterFeats.length > 0 && (
+              <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6, overflow: 'hidden', mixBlendMode: 'screen' as const }} width="100%" height="100%">
+                <defs>
+                  <radialGradient id="nglow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stopColor="#FFFBE6" stopOpacity="0.95" />
+                    <stop offset="35%" stopColor="#FCD34D" stopOpacity="0.45" />
+                    <stop offset="100%" stopColor="#F59E0B" stopOpacity="0" />
+                  </radialGradient>
+                </defs>
+                {emitterFeats.map(f => {
+                  const el = allEls.find(e => e.id === f.properties.elementType) as any
+                  const radFt = (el?.illuminationRadius ?? 20) as number
+                  if (f.geometry.type === 'Point') {
+                    const coord = f.geometry.coordinates as [number, number]
+                    const [px, py] = lngLatToScreen(map, coord)
+                    const rPx = feetToPixels(map, radFt, coord[1])
+                    return <circle key={f.properties.id} cx={px} cy={py} r={rPx} fill="url(#nglow)" />
+                  }
+                  if (f.geometry.type === 'LineString') {
+                    const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+                    const spacingPx = feetToPixels(map, 6, coords[0][1])
+                    const pts = samplePolyline(map, coords, spacingPx)
+                    const rPx = feetToPixels(map, radFt, coords[0][1])
+                    return (
+                      <g key={f.properties.id}>
+                        {pts.map((pt, i) => {
+                          const [px, py] = lngLatToScreen(map, pt)
+                          return <circle key={i} cx={px} cy={py} r={rPx} fill="url(#nglow)" />
+                        })}
+                      </g>
+                    )
+                  }
+                  return null
+                })}
+              </svg>
+            )}
+          </>
+        )
+      })()}
 
       {/* Map controls (top-right) */}
       <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 20, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
@@ -2827,12 +2959,42 @@ export function Canvas() {
 
       {/* Draw hint */}
       {['pen', 'line', 'rect', 'ellipse', 'polygon'].includes(activeTool) && (
-        <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.65)', color: '#fff', borderRadius: 16, padding: '4px 14px', fontSize: 11, pointerEvents: 'none', zIndex: 20, backdropFilter: 'blur(6px)', whiteSpace: 'nowrap' }}>
-          {activeTool === 'line'
-            ? 'Click to add points · Double-click to finish · Esc to cancel'
-            : activeTool === 'rect' || activeTool === 'ellipse'
-              ? 'Click first corner · Click second corner to finish · Esc to cancel'
-              : 'Click to add points · Click first point to close · Double-click to finish · Esc to cancel'}
+        <div style={{ position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.7)', color: '#fff', borderRadius: 16, padding: '4px 14px', fontSize: 11, pointerEvents: 'none', zIndex: 20, backdropFilter: 'blur(6px)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ opacity: 0.8 }}>
+            {activeTool === 'line'
+              ? 'Click to add points · Double-click to finish · Esc to cancel'
+              : activeTool === 'rect' || activeTool === 'ellipse'
+                ? 'Click first corner · Click second corner to finish · Esc to cancel'
+                : 'Click to add points · Click first point to close · Double-click to finish · Esc to cancel'}
+          </span>
+          {activeTool === 'line' && drawNodes.length >= 2 && (
+            <span style={{ fontWeight: 700, paddingLeft: 10, borderLeft: '1px solid rgba(255,255,255,0.3)' }}>
+              {fmtDist(lineStringLengthFt(drawNodes))}
+            </span>
+          )}
+          {activeTool === 'polygon' && drawNodes.length >= 3 && (
+            <span style={{ fontWeight: 700, paddingLeft: 10, borderLeft: '1px solid rgba(255,255,255,0.3)' }}>
+              {Math.round(polygonAreaSqFt(drawNodes)).toLocaleString()} sq ft
+            </span>
+          )}
+          {activeTool === 'rect' && drawNodes.length === 2 && (() => {
+            const wFt = haversineFt(drawNodes[0], [drawNodes[1][0], drawNodes[0][1]])
+            const hFt = haversineFt(drawNodes[0], [drawNodes[0][0], drawNodes[1][1]])
+            return (
+              <span style={{ fontWeight: 700, paddingLeft: 10, borderLeft: '1px solid rgba(255,255,255,0.3)' }}>
+                {Math.round(wFt * hFt).toLocaleString()} sq ft
+              </span>
+            )
+          })()}
+          {activeTool === 'ellipse' && drawNodes.length === 2 && (() => {
+            const wFt = haversineFt(drawNodes[0], [drawNodes[1][0], drawNodes[0][1]])
+            const hFt = haversineFt(drawNodes[0], [drawNodes[0][0], drawNodes[1][1]])
+            return (
+              <span style={{ fontWeight: 700, paddingLeft: 10, borderLeft: '1px solid rgba(255,255,255,0.3)' }}>
+                {Math.round(Math.PI / 4 * wFt * hFt).toLocaleString()} sq ft
+              </span>
+            )
+          })()}
         </div>
       )}
 
