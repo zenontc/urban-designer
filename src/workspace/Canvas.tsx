@@ -2470,7 +2470,9 @@ export function Canvas() {
       // ── Corridor rendering for street-section elements ──
       if (f.properties.category === 'streets' && isLine) {
         const lanes = (f.properties.streetLanes ?? defaultLanesForType(f.properties.elementType)) as StreetLane[]
-        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        const rawCoords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        const bezNodes = (f.properties as any).bezierNodes as BezierNode[] | undefined
+        const coords = bezNodes && bezNodes.length >= 2 ? bezierNodesToCoords(bezNodes) : rawCoords
         const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
         const totalWidthFt = lanes.reduce((s: number, l: StreetLane) => s + l.width, 0)
         const totalPx = Math.max(4, feetToPixels(map, totalWidthFt, avgLat))
@@ -2557,6 +2559,61 @@ export function Canvas() {
             ))}
             {/* Lane markings */}
             {markings}
+          </g>
+        )
+      }
+
+      // ── Paths at real-world widths ──
+      if (f.properties.category === 'paths' && isLine) {
+        const PATH_WIDTHS: Record<string, number> = {
+          'sidewalk': 5, 'multi-path': 12, 'footbridge': 8,
+          'ped-tunnel': 8, 'steps': 5,
+        }
+        const widthFt = PATH_WIDTHS[f.properties.elementType]
+        if (widthFt) {
+          const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+          const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
+          const widthPx = Math.max(2, feetToPixels(map, widthFt, avgLat))
+          const pathColor = style.strokeColor ?? '#D1D5DB'
+          const isDashed = f.properties.elementType === 'ped-tunnel'
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={widthPx + 4} strokeOpacity={0.35} strokeLinecap="round" strokeLinejoin="round" />}
+              <path d={path} fill="none" stroke="#1a1a1a" strokeWidth={widthPx + 1.5} strokeLinecap="round" strokeLinejoin="round" />
+              <path d={path} fill="none" stroke={pathColor} strokeWidth={widthPx} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={isDashed ? '12 8' : undefined} />
+              {f.properties.elementType === 'steps' && (() => {
+                const pts = coords.map(c => lngLatToScreen(map, c)) as [number, number][]
+                const risePx = feetToPixels(map, 1, avgLat)
+                const steps: React.ReactNode[] = []
+                for (let i = 0; i < pts.length - 1; i++) {
+                  const [x1, y1] = pts[i], [x2, y2] = pts[i + 1]
+                  const segLen = Math.hypot(x2 - x1, y2 - y1)
+                  const numRisers = Math.max(1, Math.round(segLen / risePx))
+                  for (let r = 1; r < numRisers; r++) {
+                    const t = r / numRisers
+                    const cx = x1 + (x2 - x1) * t, cy = y1 + (y2 - y1) * t
+                    const nx = -(y2 - y1) / segLen, ny = (x2 - x1) / segLen
+                    steps.push(<line key={`${i}-${r}`} x1={cx - nx * widthPx / 2} y1={cy - ny * widthPx / 2} x2={cx + nx * widthPx / 2} y2={cy + ny * widthPx / 2} stroke="rgba(0,0,0,0.35)" strokeWidth={1} />)
+                  }
+                }
+                return steps
+              })()}
+            </g>
+          )
+        }
+      }
+
+      // ── Hedge / espalier at real-world width ──
+      if ((f.properties.elementType === 'hedge' || f.properties.elementType === 'espalier') && isLine) {
+        const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
+        const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
+        const widthFt = f.properties.elementType === 'hedge' ? 4 : 2
+        const widthPx = Math.max(2, feetToPixels(map, widthFt, avgLat))
+        const hedgeColor = style.strokeColor ?? '#15803D'
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={widthPx + 4} strokeOpacity={0.35} strokeLinecap="round" />}
+            <path d={path} fill="none" stroke={hedgeColor} strokeWidth={widthPx} strokeLinecap="round" strokeLinejoin="round" strokeOpacity={0.9} />
           </g>
         )
       }
@@ -3188,6 +3245,14 @@ export function Canvas() {
               {Math.round(polygonAreaSqFt(drawNodes)).toLocaleString()} sq ft
             </span>
           )}
+          {activeTool === 'pen' && penNodes.length >= 3 && (() => {
+            const sampledCoords = bezierNodesToCoords(penNodes)
+            return (
+              <span style={{ fontWeight: 700, paddingLeft: 10, borderLeft: '1px solid rgba(255,255,255,0.3)' }}>
+                {Math.round(polygonAreaSqFt(sampledCoords)).toLocaleString()} sq ft
+              </span>
+            )
+          })()}
           {activeTool === 'rect' && drawNodes.length === 2 && (() => {
             const wFt = haversineFt(drawNodes[0], [drawNodes[1][0], drawNodes[0][1]])
             const hFt = haversineFt(drawNodes[0], [drawNodes[0][0], drawNodes[1][1]])
