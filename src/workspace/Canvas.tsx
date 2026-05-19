@@ -1780,28 +1780,162 @@ export function Canvas() {
       )
     }
 
-    // Actors (pedestrian, bicyclist, etc.)
+    // Actors — plan-view (top-down), real-world scale
     if (cat === 'actors') {
-      const isVehicle = elId === 'car' || elId === 'delivery-vehicle' || elId === 'bus-vehicle'
-      if (isVehicle) {
-        const w = elId === 'bus-vehicle' ? 14 : 10
-        const h = elId === 'bus-vehicle' ? 22 : 16
+      const lat = (f.geometry as GeoJSON.Point).coordinates[1]
+      // fp: feet → pixels with a minimum so actors are always visible
+      const fp = (feet: number, minPx = 4) => Math.max(minPx, feetToPixels(map!, feet, lat))
+      const selRing = (r: number) => isSelected && <circle cx={0} cy={0} r={r} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />
+      const selRect = (w: number, h: number) => isSelected && <rect x={-w/2-4} y={-h/2-4} width={w+8} height={h+8} rx={4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />
+
+      // ── Automobile ──────────────────────────────────────────────────────
+      if (elId === 'car') {
+        const w = fp(6, 8), l = w * 2.5
+        const ww = Math.max(2, w * 0.22), wl = Math.max(3, l * 0.23)
+        const corners: [number, number][] = [
+          [-w/2 - ww*0.35, -l/2 + l*0.1],
+          [ w/2 - ww*0.65, -l/2 + l*0.1],
+          [-w/2 - ww*0.35,  l/2 - l*0.1 - wl],
+          [ w/2 - ww*0.65,  l/2 - l*0.1 - wl],
+        ]
         return (
-          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-            <rect x={px - w / 2} y={py - h / 2} width={w} height={h} rx={2}
-              fill={fill} stroke={strokeColor} strokeWidth={sw} />
-            {isSelected && <circle cx={px} cy={py} r={Math.max(w, h) / 2 + 5}
-              fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-w/2+1} y={-l/2+1} width={w} height={l} rx={w*0.22} fill="rgba(0,0,0,0.25)" />
+            <rect x={-w/2} y={-l/2} width={w} height={l} rx={w*0.22} fill={fill} />
+            <rect x={-w*0.32} y={-l/2+l*0.09} width={w*0.64} height={l*0.19} rx={1.5} fill="rgba(186,230,253,0.75)" />
+            <rect x={-w*0.32} y={ l/2-l*0.28} width={w*0.64} height={l*0.15} rx={1.5} fill="rgba(186,230,253,0.55)" />
+            {corners.map(([cx2, cy2], i) => <rect key={i} x={cx2} y={cy2} width={ww} height={wl} rx={ww*0.4} fill="#111" />)}
+            {selRect(w, l)}
           </g>
         )
       }
-      // Person silhouette
+
+      // ── Delivery Vehicle ────────────────────────────────────────────────
+      if (elId === 'delivery-vehicle') {
+        const w = fp(7, 9), l = w * (20/7)
+        const cabL = l * 0.32
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-w/2+1} y={-l/2+1} width={w} height={l} rx={3} fill="rgba(0,0,0,0.22)" />
+            <rect x={-w/2} y={-l/2+cabL} width={w} height={l-cabL} rx={3} fill={fill} />
+            <rect x={-w/2} y={-l/2} width={w} height={cabL+2} rx={3} fill={fill} fillOpacity={0.82} />
+            <rect x={-w*0.3} y={-l/2+l*0.04} width={w*0.6} height={cabL*0.44} rx={1.5} fill="rgba(186,230,253,0.7)" />
+            <line x1={-w/2} y1={-l/2+cabL} x2={w/2} y2={-l/2+cabL} stroke="rgba(0,0,0,0.28)" strokeWidth={1} />
+            {selRect(w, l)}
+          </g>
+        )
+      }
+
+      // ── Bus ─────────────────────────────────────────────────────────────
+      if (elId === 'bus-vehicle') {
+        const w = fp(8.5, 10), l = w * (40/8.5)
+        const nWin = Math.max(4, Math.round(l / (w * 0.85)))
+        const wH = (l * 0.74) / nWin * 0.6
+        const wW = w * 0.2
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <rect x={-w/2+1} y={-l/2+1} width={w} height={l} rx={w*0.14} fill="rgba(0,0,0,0.22)" />
+            <rect x={-w/2} y={-l/2} width={w} height={l} rx={w*0.14} fill={fill} />
+            <rect x={-w*0.38} y={-l/2+l*0.035} width={w*0.76} height={l*0.055} rx={2} fill="rgba(0,0,0,0.55)" />
+            {Array.from({length: nWin}).map((_, i) => {
+              const wy = -l/2 + l*0.13 + i * (l * 0.74 / nWin)
+              return (
+                <g key={i}>
+                  <rect x={-w/2+w*0.07} y={wy} width={wW} height={wH} rx={1} fill="rgba(186,230,253,0.6)" />
+                  <rect x={ w/2-w*0.07-wW} y={wy} width={wW} height={wH} rx={1} fill="rgba(186,230,253,0.6)" />
+                </g>
+              )
+            })}
+            <rect x={-w*0.42} y={l*0.06} width={w*0.28} height={l*0.09} rx={1.5} fill="rgba(186,230,253,0.4)" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} />
+            {selRect(w, l)}
+          </g>
+        )
+      }
+
+      // ── Pedestrian ──────────────────────────────────────────────────────
+      if (elId === 'pedestrian') {
+        const r = fp(1.5, 6)
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <circle cx={0} cy={0} r={r} fill={fill} fillOpacity={0.9} />
+            <circle cx={0} cy={-r*0.28} r={r*0.44} fill="rgba(255,255,255,0.3)" />
+            {selRing(r + 4)}
+          </g>
+        )
+      }
+
+      // ── Bicyclist / Scooter ─────────────────────────────────────────────
+      if (elId === 'bicyclist' || elId === 'scooter-rider') {
+        const bodyR = fp(1.2, 5)
+        const wheelR = Math.max(bodyR * 0.85, fp(1.0, 3))
+        const bikeL = Math.max(bodyR * 3.2, fp(5.5, 14))
+        const sw2 = Math.max(1.5, wheelR * 0.45)
+        const isScooter = elId === 'scooter-rider'
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <circle cx={0} cy={-bikeL/2} r={wheelR} fill="none" stroke={fill} strokeWidth={sw2} />
+            <circle cx={0} cy={ bikeL/2} r={wheelR} fill="none" stroke={fill} strokeWidth={sw2} />
+            <line x1={0} y1={-bikeL/2} x2={0} y2={bikeL/2} stroke={fill} strokeWidth={Math.max(1, sw2*0.65)} strokeOpacity={0.65} />
+            {!isScooter && <line x1={-bodyR*0.9} y1={-bikeL*0.1} x2={bodyR*0.9} y2={-bikeL*0.1} stroke={fill} strokeWidth={Math.max(1, sw2*0.55)} strokeOpacity={0.6} />}
+            {isScooter && <rect x={-bodyR*0.55} y={-bikeL*0.1-bodyR*0.4} width={bodyR*1.1} height={bodyR*0.4} rx={2} fill={fill} fillOpacity={0.5} />}
+            <circle cx={0} cy={0} r={bodyR} fill={fill} fillOpacity={0.9} />
+            {selRing(bikeL/2 + 4)}
+          </g>
+        )
+      }
+
+      // ── Wheelchair User ─────────────────────────────────────────────────
+      if (elId === 'wheelchair-user') {
+        const bodyR = fp(1.5, 6)
+        const wR = fp(1.2, 4)
+        const sw2 = Math.max(1.5, wR * 0.44)
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <circle cx={-bodyR*1.15} cy={bodyR*0.25} r={wR} fill="none" stroke={fill} strokeWidth={sw2} />
+            <circle cx={ bodyR*1.15} cy={bodyR*0.25} r={wR} fill="none" stroke={fill} strokeWidth={sw2} />
+            <circle cx={-bodyR*0.5} cy={-bodyR*0.85} r={Math.max(2, wR*0.36)} fill={fill} fillOpacity={0.6} />
+            <circle cx={ bodyR*0.5} cy={-bodyR*0.85} r={Math.max(2, wR*0.36)} fill={fill} fillOpacity={0.6} />
+            <circle cx={0} cy={0} r={bodyR} fill={fill} fillOpacity={0.88} />
+            {selRing(bodyR + wR + 4)}
+          </g>
+        )
+      }
+
+      // ── Dog Walker ──────────────────────────────────────────────────────
+      if (elId === 'dog-walker') {
+        const pr = fp(1.5, 6)
+        const dr = fp(0.8, 3)
+        const leashL = fp(4, 14)
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            <line x1={0} y1={-pr} x2={0} y2={-pr-leashL} stroke={fill} strokeWidth={1} strokeOpacity={0.45} strokeDasharray="2 2" />
+            <ellipse cx={0} cy={-pr-leashL-dr*0.75} rx={dr*1.4} ry={dr} fill={fill} fillOpacity={0.72} />
+            <circle cx={0} cy={0} r={pr} fill={fill} fillOpacity={0.9} />
+            <circle cx={0} cy={-pr*0.3} r={pr*0.42} fill="rgba(255,255,255,0.28)" />
+            {isSelected && <circle cx={0} cy={-(pr+leashL)/2} r={pr+leashL+dr+4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />}
+          </g>
+        )
+      }
+
+      // ── Outdoor Dining ──────────────────────────────────────────────────
+      if (elId === 'outdoor-dining') {
+        const pr = fp(1.2, 4)
+        const offsets: [number, number][] = [[-pr*2, -pr*0.4], [0, -pr*2.2], [pr*2, -pr*0.4], [pr*1.5, pr*1.9], [-pr*1.5, pr*1.9]]
+        return (
+          <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+            {offsets.map(([ox, oy], i) => <circle key={i} cx={ox} cy={oy} r={pr} fill={fill} fillOpacity={0.7 + i*0.05} />)}
+            {isSelected && <circle cx={0} cy={0} r={pr*3.5+4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />}
+          </g>
+        )
+      }
+
+      // ── Default person ──────────────────────────────────────────────────
+      const r = fp(1.5, 6)
       return (
-        <g key={f.properties.id} style={{ pointerEvents: 'none' }} transform={`translate(${px},${py})`}>
-          <circle cx={0} cy={-7} r={3.5} fill={fill} stroke={strokeColor} strokeWidth={sw * 0.7} />
-          <path d="M0,-3 L0,4 M-4,0 L4,0 M0,4 L-3,11 M0,4 L3,11"
-            stroke={fill} strokeWidth={2} strokeLinecap="round" fill="none" />
-          {isSelected && <circle cx={0} cy={2} r={13} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <circle cx={0} cy={0} r={r} fill={fill} fillOpacity={0.9} />
+          <circle cx={0} cy={-r*0.28} r={r*0.42} fill="rgba(255,255,255,0.28)" />
+          {selRing(r + 4)}
         </g>
       )
     }
