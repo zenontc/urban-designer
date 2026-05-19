@@ -214,6 +214,9 @@ function FeatureEditor({
         </>
       )}
 
+      {/* Element-specific controls */}
+      <ElementSpecificControls feature={feature} updateFeature={updateFeature} />
+
       {/* Flags */}
       <div style={{ display: 'flex', gap: 8 }}>
         <FlagToggle label="In Metrics" value={p.inMetrics} onChange={v => set('inMetrics', v)} />
@@ -240,6 +243,137 @@ function FeatureEditor({
       )}
     </div>
   )
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+      <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>{children}</div>
+    </div>
+  )
+}
+
+function NumInput({ value, min, max, step = 1, onChange }: { value: number; min: number; max: number; step?: number; onChange: (v: number) => void }) {
+  return (
+    <input type="number" value={value} min={min} max={max} step={step}
+      onChange={e => onChange(Number(e.target.value))}
+      style={{ width: 54, height: 24, padding: '0 5px', fontSize: 11, borderRadius: 3, border: '1px solid var(--color-border)', background: 'var(--color-bg-elevated)', color: 'var(--color-text)', outline: 'none', textAlign: 'right' }} />
+  )
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', display: 'block', marginBottom: 5, marginTop: 2 }}>
+      {children}
+    </span>
+  )
+}
+
+function ElementSpecificControls({ feature, updateFeature }: { feature: UMPFeature; updateFeature: (id: string, props: Partial<UMPFeatureProperties>) => void }) {
+  const p = feature.properties
+  const elType = p.elementType
+  const any = p as unknown as Record<string, number | string | boolean>
+
+  function setProp(key: string, value: number | string | boolean) {
+    updateFeature(p.id, { [key]: value } as Partial<UMPFeatureProperties>)
+  }
+
+  // Street tree row
+  if (elType === 'street-tree') {
+    const spacing = (any.treeSpacing as number) ?? 30
+    const size    = (any.treeSize    as number) ?? 10
+    return (
+      <div>
+        <div style={{ height: 1, background: 'var(--color-border)', marginBottom: 8 }} />
+        <SectionLabel>Tree Options</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Row label="Spacing (ft)">
+            <input type="range" min={10} max={80} step={5} value={spacing}
+              onChange={e => setProp('treeSpacing', Number(e.target.value))} style={{ width: 60 }} />
+            <NumInput value={spacing} min={10} max={80} step={5} onChange={v => setProp('treeSpacing', v)} />
+          </Row>
+          <Row label="Canopy size (ft)">
+            <input type="range" min={4} max={40} step={2} value={size}
+              onChange={e => setProp('treeSize', Number(e.target.value))} style={{ width: 60 }} />
+            <NumInput value={size} min={4} max={40} step={2} onChange={v => setProp('treeSize', v)} />
+          </Row>
+        </div>
+      </div>
+    )
+  }
+
+  // Parking - stall dimensions
+  if (elType === 'parallel-parking' || elType === 'headin-parking' || elType === 'diagonal-parking') {
+    const isParallel = elType === 'parallel-parking'
+    const defaultSpacing = isParallel ? 22 : 9
+    const defaultDepth   = isParallel ? 8 : 18
+    const spacing = (any.stallSpacing as number) ?? defaultSpacing
+    const depth   = (any.stallDepth   as number) ?? defaultDepth
+    return (
+      <div>
+        <div style={{ height: 1, background: 'var(--color-border)', marginBottom: 8 }} />
+        <SectionLabel>Stall Dimensions</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <Row label={isParallel ? 'Stall length (ft)' : 'Stall width (ft)'}>
+            <NumInput value={spacing} min={8} max={30} onChange={v => setProp('stallSpacing', v)} />
+          </Row>
+          <Row label={isParallel ? 'Stall width (ft)' : 'Stall depth (ft)'}>
+            <NumInput value={depth} min={6} max={25} onChange={v => setProp('stallDepth', v)} />
+          </Row>
+        </div>
+      </div>
+    )
+  }
+
+  // Building height / floors
+  if (p.category === 'buildings' && 'floors' in any) {
+    const floors = (any.floors as number) ?? 2
+    return (
+      <div>
+        <div style={{ height: 1, background: 'var(--color-border)', marginBottom: 8 }} />
+        <SectionLabel>Building</SectionLabel>
+        <Row label="Floors">
+          <input type="range" min={1} max={60} value={floors}
+            onChange={e => setProp('floors', Number(e.target.value))} style={{ width: 60 }} />
+          <NumInput value={floors} min={1} max={60} onChange={v => setProp('floors', v)} />
+        </Row>
+      </div>
+    )
+  }
+
+  // Speed sign
+  if (elType === 'speed-sign') {
+    const speed = (any.speed as number) ?? 25
+    return (
+      <div>
+        <div style={{ height: 1, background: 'var(--color-border)', marginBottom: 8 }} />
+        <SectionLabel>Sign</SectionLabel>
+        <Row label="Speed limit">
+          <NumInput value={speed} min={5} max={85} step={5} onChange={v => setProp('speed', v)} />
+          <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>mph</span>
+        </Row>
+      </div>
+    )
+  }
+
+  // Parking structure / deck (levels)
+  if (elType === 'parking-deck-bldg' || elType === 'parking-deck') {
+    const levels = (any.levels as number) ?? 4
+    return (
+      <div>
+        <div style={{ height: 1, background: 'var(--color-border)', marginBottom: 8 }} />
+        <SectionLabel>Structure</SectionLabel>
+        <Row label="Levels">
+          <input type="range" min={1} max={12} value={levels}
+            onChange={e => setProp('levels', Number(e.target.value))} style={{ width: 60 }} />
+          <NumInput value={levels} min={1} max={12} onChange={v => setProp('levels', v)} />
+        </Row>
+      </div>
+    )
+  }
+
+  return null
 }
 
 function FlagToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
