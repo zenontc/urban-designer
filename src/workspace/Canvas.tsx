@@ -10,6 +10,7 @@ import type { LayerItem } from '../store/layersStore'
 import { MapOrientationControl } from './components/MapOrientationControl'
 import { ELEMENT_CATEGORIES } from '../elements/categories'
 import { CrossSectionInline, defaultLanesForType } from './CrossSectionInline'
+import type { StreetLane } from './CrossSectionInline'
 import {
   lngLatToScreen, screenToLngLat, feetToPixels, haversineFt, fmtDist,
   distToSegment, pointInPolygon, screenBbox,
@@ -2365,20 +2366,94 @@ export function Canvas() {
 
       // ── Corridor rendering for street-section elements ──
       if (f.properties.category === 'streets' && isLine) {
-        const lanes = f.properties.streetLanes ?? defaultLanesForType(f.properties.elementType)
+        const lanes = (f.properties.streetLanes ?? defaultLanesForType(f.properties.elementType)) as StreetLane[]
         const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
         const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
-        const totalWidthFt = lanes.reduce((s, l) => s + l.width, 0)
+        const totalWidthFt = lanes.reduce((s: number, l: StreetLane) => s + l.width, 0)
         const totalPx = Math.max(4, feetToPixels(map, totalWidthFt, avgLat))
+        const halfTotalFt = totalWidthFt / 2
+        const sPts = coords.map(c => lngLatToScreen(map, c)) as [number, number][]
+
+        // Compute a path offset by offsetPx pixels perpendicular to the centerline (+ = right)
+        const offPath = (offsetPx: number): string => {
+          const off = sPts.map((pt, i) => {
+            let nx = 0, ny = 0
+            if (i > 0) { const dx = pt[0]-sPts[i-1][0], dy = pt[1]-sPts[i-1][1], l = Math.hypot(dx,dy); if (l>0){nx+=-dy/l;ny+=dx/l} }
+            if (i < sPts.length-1) { const dx = sPts[i+1][0]-pt[0], dy = sPts[i+1][1]-pt[1], l = Math.hypot(dx,dy); if (l>0){nx+=-dy/l;ny+=dx/l} }
+            const nl = Math.hypot(nx, ny); if (nl > 0) { nx /= nl; ny /= nl }
+            return [pt[0] + offsetPx * nx, pt[1] + offsetPx * ny]
+          })
+          return off.map((p, i) => `${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+        }
+
+        const ZONE_CLR: Record<string, string> = {
+          'Sidewalk':        '#B8B4A0',
+          'Setback':         '#C0D0A0',
+          'Pedestrian Zone': '#CBBF96',
+          'Bike Lane':       '#4A7A38',
+          'Travel Lane':     '#3A3A3A',
+          'Shoulder':        '#484848',
+          'Parking':         '#424242',
+          'Center Turn':     '#3A3A3A',
+          'Median':          '#4A6E30',
+        }
+
+        // Compute per-zone screen offsets and widths
+        let cumFt = 0
+        const zoneLayers = lanes.map((lane: StreetLane) => {
+          const centerFt = cumFt + lane.width / 2
+          cumFt += lane.width
+          const offFromCenter = centerFt - halfTotalFt
+          const offPx = feetToPixels(map, Math.abs(offFromCenter), avgLat) * Math.sign(offFromCenter)
+          const wPx = feetToPixels(map, lane.width, avgLat)
+          return { lane, offPx, wPx }
+        })
+
+        // Compute lane boundary markings
+        let bCumFt = 0
+        const markings: React.ReactNode[] = []
+        lanes.forEach((lane: StreetLane, i: number) => {
+          bCumFt += lane.width
+          if (i === lanes.length - 1) return
+          const next = lanes[i + 1]
+          const lbl = lane.label, nxt = next.label
+          // Sidewalk/Setback edges are curbs, not painted lines
+          if (lbl === 'Sidewalk' || nxt === 'Sidewalk' || lbl === 'Setback' || nxt === 'Setback') return
+          const bOff = bCumFt - halfTotalFt
+          const bPx = feetToPixels(map, Math.abs(bOff), avgLat) * Math.sign(bOff)
+          const isCenterDiv = lbl === 'Center Turn' || nxt === 'Center Turn' || lbl === 'Median' || nxt === 'Median'
+          if (isCenterDiv) {
+            // Double yellow at center turn/median boundaries
+            markings.push(
+              <path key={`dya${i}`} d={offPath(bPx - 2.5)} fill="none" stroke="#F5C518" strokeWidth={1.5} strokeLinecap="butt" strokeLinejoin="round" />,
+              <path key={`dyb${i}`} d={offPath(bPx + 2.5)} fill="none" stroke="#F5C518" strokeWidth={1.5} strokeLinecap="butt" strokeLinejoin="round" />,
+            )
+          } else if (lbl === 'Bike Lane' || nxt === 'Bike Lane' || lbl === 'Parking' || nxt === 'Parking' || lbl === 'Shoulder' || nxt === 'Shoulder') {
+            // White solid at bike/parking/shoulder edges
+            markings.push(
+              <path key={`ws${i}`} d={offPath(bPx)} fill="none" stroke="#FFFFFF" strokeWidth={1.5} strokeLinecap="butt" strokeLinejoin="round" />,
+            )
+          } else if (lbl === 'Travel Lane' && nxt === 'Travel Lane') {
+            // White dashed between same-direction travel lanes
+            markings.push(
+              <path key={`wd${i}`} d={offPath(bPx)} fill="none" stroke="#FFFFFF" strokeWidth={1.0} strokeLinecap="butt" strokeLinejoin="round" strokeDasharray="10 20" />,
+            )
+          }
+        })
+
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
             {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={totalPx + 6} strokeLinecap="butt" strokeLinejoin="round" strokeOpacity={0.35} />}
-            {/* Curb/gutter outer edge */}
-            <path d={path} fill="none" stroke="#1a1a1a" strokeWidth={totalPx + 2} strokeLinecap="butt" strokeLinejoin="round" />
-            {/* Road surface */}
-            <path d={path} fill="none" stroke="#374151" strokeWidth={totalPx} strokeLinecap="butt" strokeLinejoin="round" />
-            {/* Center line dashes */}
-            <path d={path} fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth={0.75} strokeDasharray="12 8" strokeLinecap="round" />
+            {/* Dark curb border */}
+            <path d={path} fill="none" stroke="#111111" strokeWidth={totalPx + 2} strokeLinecap="butt" strokeLinejoin="round" />
+            {/* Zone background fills */}
+            {zoneLayers.map(({ lane, offPx, wPx }: { lane: StreetLane; offPx: number; wPx: number }) => (
+              <path key={`z${lane.id}`} d={offPath(offPx)} fill="none"
+                    stroke={ZONE_CLR[lane.label] ?? '#3A3A3A'}
+                    strokeWidth={wPx + 1.5} strokeLinecap="butt" strokeLinejoin="round" />
+            ))}
+            {/* Lane markings */}
+            {markings}
           </g>
         )
       }
