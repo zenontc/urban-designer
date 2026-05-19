@@ -1823,14 +1823,37 @@ export function Canvas() {
       )
     }
 
-    // Direction arrows (markings)
-    if (cat === 'markings' && (elId === 'direction-arrow' || elId === 'left-turn-arrow' || elId === 'right-turn-arrow')) {
-      const arrowRot = elId === 'left-turn-arrow' ? -45 : elId === 'right-turn-arrow' ? 45 : 0
+    // Direction / turn arrows (markings) — MUTCD-style pavement arrows
+    if (cat === 'markings' && (elId === 'direction-arrow' || elId === 'left-turn-arrow' || elId === 'right-turn-arrow' || elId === 'only-stencil')) {
+      // Forward arrow: wide MUTCD-style head + narrow stem
+      const fwdArrow = 'M0,-20 L13,-4 L7,-4 L7,20 L-7,20 L-7,-4 L-13,-4 Z'
+      // Left turn: arc left with arrowhead
+      const leftTurn = 'M-4,18 L-4,-2 Q-4,-14 -14,-14 L-20,-14 L-14,-20 L-8,-14 Q2,-14 2,-2 L2,18 Z'
+      // Right turn
+      const rightTurn = 'M4,18 L4,-2 Q4,-14 14,-14 L20,-14 L14,-20 L8,-14 Q-2,-14 -2,-2 L-2,18 Z'
+      const isOnly = elId === 'only-stencil'
+      const arrowShape = elId === 'left-turn-arrow' ? leftTurn : elId === 'right-turn-arrow' ? rightTurn : fwdArrow
       return (
-        <g key={f.properties.id} transform={`translate(${px},${py}) rotate(${arrowRot})`} style={{ pointerEvents: 'none' }}>
-          <path d="M0,-12 L5,-2 L2,-2 L2,12 L-2,12 L-2,-2 L-5,-2 Z"
-            fill={fill} stroke={strokeColor} strokeWidth={sw * 0.5} strokeLinejoin="round" />
-          {isSelected && <circle cx={0} cy={0} r={16} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          {!isOnly && <path d={arrowShape} fill={fill} stroke="none" fillOpacity={0.92} />}
+          {isOnly && (
+            <>
+              <path d={fwdArrow} fill={fill} fillOpacity={0.92} />
+              <text x={0} y={36} textAnchor="middle" fontSize={10} fontWeight="bold" fill={fill} style={{ userSelect: 'none' }}>ONLY</text>
+            </>
+          )}
+          {isSelected && <circle cx={0} cy={0} r={22} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
+        </g>
+      )
+    }
+
+    // Bus-only stencil
+    if (elId === 'bus-only-stencil') {
+      return (
+        <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
+          <text x={0} y={-4} textAnchor="middle" fontSize={11} fontWeight="bold" fill={fill} fillOpacity={0.92} style={{ userSelect: 'none' }}>BUS</text>
+          <text x={0} y={8} textAnchor="middle" fontSize={11} fontWeight="bold" fill={fill} fillOpacity={0.92} style={{ userSelect: 'none' }}>ONLY</text>
+          {isSelected && <circle cx={0} cy={0} r={18} fill="none" stroke={selColor} strokeWidth={1} strokeDasharray="3 3" opacity={0.6} />}
         </g>
       )
     }
@@ -2281,6 +2304,56 @@ export function Canvas() {
             </g>
           )
         }
+      }
+
+      // ── Diagonal hatch box (buffer zone, gore area, channelization) ──
+      if (f.properties.elementType === 'hatch-box' && !isLine) {
+        const patId = `hatch-${f.properties.id.replace(/[^a-z0-9]/gi, '')}`
+        const hatchColor = style.fillColor ?? '#FFFFFF'
+        const opacity = (style.fillOpacity ?? 40) / 100
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <defs>
+              <pattern id={patId} patternUnits="userSpaceOnUse" width="16" height="16">
+                {/* Diagonal lines at 45°, tiled seamlessly */}
+                <line x1="0" y1="16" x2="16" y2="0" stroke={hatchColor} strokeWidth={4.5} strokeOpacity={opacity} />
+                <line x1="-8" y1="8" x2="8" y2="-8" stroke={hatchColor} strokeWidth={4.5} strokeOpacity={opacity} />
+                <line x1="8" y1="24" x2="24" y2="8" stroke={hatchColor} strokeWidth={4.5} strokeOpacity={opacity} />
+              </pattern>
+              <clipPath id={`${patId}-clip`}>
+                <path d={path} />
+              </clipPath>
+            </defs>
+            <path d={path} fill={`url(#${patId})`} clipPath={`url(#${patId}-clip)`} />
+            <path d={path} fill="none" stroke={hatchColor} strokeWidth={Math.max(sw, 1.5)} strokeOpacity={Math.min(1, opacity + 0.35)} />
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
+          </g>
+        )
+      }
+
+      // ── Refuge island / curb extension (concrete with approach hatching) ──
+      if ((f.properties.elementType === 'refuge-island' || f.properties.elementType === 'curb-extension') && !isLine) {
+        const patId = `refuge-${f.properties.id.replace(/[^a-z0-9]/gi, '')}`
+        const surfColor = style.fillColor ?? '#D1D5DB'
+        const opacity = (style.fillOpacity ?? 80) / 100
+        return (
+          <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+            <defs>
+              <pattern id={patId} patternUnits="userSpaceOnUse" width="10" height="10">
+                <line x1="0" y1="10" x2="10" y2="0" stroke="rgba(0,0,0,0.18)" strokeWidth={2.5} />
+                <line x1="-5" y1="5" x2="5" y2="-5" stroke="rgba(0,0,0,0.18)" strokeWidth={2.5} />
+                <line x1="5" y1="15" x2="15" y2="5" stroke="rgba(0,0,0,0.18)" strokeWidth={2.5} />
+              </pattern>
+              <clipPath id={`${patId}-clip`}>
+                <path d={path} />
+              </clipPath>
+            </defs>
+            <path d={path} fill={surfColor} fillOpacity={opacity} />
+            <path d={path} fill={`url(#${patId})`} clipPath={`url(#${patId}-clip)`} />
+            <path d={path} fill="none" stroke="#6B7280" strokeWidth={Math.max(sw, 1.5)} />
+            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 4} strokeOpacity={0.3} />}
+          </g>
+        )
       }
 
       // ── Crosswalk rendering ──

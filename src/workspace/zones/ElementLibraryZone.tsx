@@ -236,6 +236,40 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
         </svg>
       )
     }
+    if (id === 'hatch-box') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <defs>
+            <pattern id="th-hatch" patternUnits="userSpaceOnUse" width="10" height="10">
+              <line x1="0" y1="10" x2="10" y2="0" stroke="white" strokeWidth="3" />
+              <line x1="-5" y1="5" x2="5" y2="-5" stroke="white" strokeWidth="3" />
+              <line x1="5" y1="15" x2="15" y2="5" stroke="white" strokeWidth="3" />
+            </pattern>
+          </defs>
+          <rect width="44" height="44" rx="4" fill="#374151" />
+          <rect x="4" y="10" width="36" height="24" rx="2" fill="url(#th-hatch)" fillOpacity="0.45" />
+          <rect x="4" y="10" width="36" height="24" rx="2" fill="none" stroke="white" strokeWidth="1.2" strokeOpacity="0.7" />
+        </svg>
+      )
+    }
+    if (id === 'only-stencil') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#374151" />
+          <polygon points="22,6 28,12 26,12 26,22 18,22 18,12 16,12" fill="white" opacity="0.9" />
+          <text x="22" y="34" textAnchor="middle" fontSize="9" fontWeight="bold" fill="white" fontFamily="sans-serif" opacity="0.9">ONLY</text>
+        </svg>
+      )
+    }
+    if (id === 'bus-only-stencil') {
+      return (
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <rect width="44" height="44" rx="4" fill="#374151" />
+          <text x="22" y="20" textAnchor="middle" fontSize="10" fontWeight="bold" fill="#DC2626" fontFamily="sans-serif">BUS</text>
+          <text x="22" y="32" textAnchor="middle" fontSize="10" fontWeight="bold" fill="#DC2626" fontFamily="sans-serif">ONLY</text>
+        </svg>
+      )
+    }
     // Default marking — colored line on road
     const lineColor = el.defaultStyle.strokeColor ?? '#FFFFFF'
     const dash = el.defaultStyle.lineType === 'dashed' ? '5 4' : undefined
@@ -260,12 +294,23 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
         </svg>
       )
     }
-    // Refuge island / curb extension: plan-view concrete blob
+    // Refuge island / curb extension: plan-view concrete with diagonal hatching
     return (
       <svg width="44" height="44" viewBox="0 0 44 44">
+        <defs>
+          <pattern id="th-refuge" patternUnits="userSpaceOnUse" width="7" height="7">
+            <line x1="0" y1="7" x2="7" y2="0" stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+            <line x1="-3" y1="4" x2="4" y2="-3" stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+            <line x1="3" y1="10" x2="10" y2="3" stroke="rgba(0,0,0,0.3)" strokeWidth="2" />
+          </pattern>
+          <clipPath id="th-refuge-clip">
+            <rect x="8" y="15" width="28" height="14" rx="4" />
+          </clipPath>
+        </defs>
         <rect width="44" height="44" rx="4" fill="#374151" />
-        <ellipse cx="22" cy="22" rx="10" ry="6" fill="#D1D5DB" />
-        <ellipse cx="22" cy="22" rx="10" ry="6" fill="none" stroke="#9CA3AF" strokeWidth="1" />
+        <rect x="8" y="15" width="28" height="14" rx="4" fill="#D1D5DB" />
+        <rect x="8" y="15" width="28" height="14" rx="4" fill="url(#th-refuge)" clipPath="url(#th-refuge-clip)" />
+        <rect x="8" y="15" width="28" height="14" rx="4" fill="none" stroke="#9CA3AF" strokeWidth="1.2" />
       </svg>
     )
   }
