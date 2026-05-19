@@ -1097,6 +1097,7 @@ function TilePreview({ el }: { el: ElementTypeDefinition }) {
 export function ElementLibraryZone() {
   const { setActiveElementType, activeElementType, setActiveTool, setActiveStyle } = useUIStore()
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState('')
 
   function toggle(id: string) {
     setCollapsed(prev => {
@@ -1109,21 +1110,97 @@ export function ElementLibraryZone() {
 
   function selectElement(el: ElementTypeDefinition) {
     setActiveElementType(el.id)
-    // Apply the element's default style so drawn features look correct
     if (el.defaultStyle) setActiveStyle(el.defaultStyle)
-    // Switch to the appropriate draw tool for this element type
     const dm = el.drawMode
     if (dm === 'line') setActiveTool('line')
     else if (dm === 'polygon') setActiveTool('pen')
     else if (dm === 'circle') setActiveTool('ellipse')
     else if (dm === 'rect') setActiveTool('rect')
-    else if (dm === 'place') setActiveTool('select') // click-to-place via canvas
+    else if (dm === 'place') setActiveTool('select')
     else setActiveTool('pen')
+  }
+
+  const q = query.trim().toLowerCase()
+  const isSearching = q.length > 0
+
+  // Flatten all elements filtered by query, grouped by category
+  const searchResults = isSearching
+    ? ELEMENT_CATEGORIES
+        .map(cat => ({ cat, els: cat.elements.filter(el => el.label.toLowerCase().includes(q)) }))
+        .filter(g => g.els.length > 0)
+    : null
+
+  function ElementGrid({ els }: { els: ElementTypeDefinition[] }) {
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, padding: '8px 8px 10px' }}>
+        {els.map(el => {
+          const active = activeElementType === el.id
+          return (
+            <button
+              key={el.id}
+              onClick={() => selectElement(el)}
+              title={el.label}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '6px 4px', borderRadius: 7, cursor: 'pointer',
+                border: `1.5px solid ${active ? 'var(--color-accent)' : 'transparent'}`,
+                background: active ? 'var(--color-accent-subtle)' : 'transparent',
+                transition: 'all 100ms',
+              }}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--color-bg-elevated)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
+            >
+              <TilePreview el={el} />
+              <span style={{ fontSize: 9, color: active ? 'var(--color-accent)' : 'var(--color-text-muted)', textAlign: 'center', lineHeight: 1.2, maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', fontWeight: active ? 600 : 400 }}>
+                {el.label}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    )
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', flex: 1 }}>
-      {ELEMENT_CATEGORIES.map(cat => {
+      {/* Search bar */}
+      <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, background: 'var(--color-bg-panel)', zIndex: 2 }}>
+        <div style={{ position: 'relative' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }}>
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Filter elements…"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '5px 26px 5px 28px', fontSize: 11, borderRadius: 6,
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg-elevated)',
+              color: 'var(--color-text)', outline: 'none',
+            }}
+          />
+          {query && (
+            <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', lineHeight: 1, padding: 0, fontSize: 14 }}>×</button>
+          )}
+        </div>
+      </div>
+
+      {/* Search results */}
+      {isSearching && searchResults && (
+        searchResults.length === 0
+          ? <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 11 }}>No elements match "{query}"</div>
+          : searchResults.map(({ cat, els }) => (
+            <div key={cat.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ padding: '6px 12px 2px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)' }}>{cat.label}</div>
+              <ElementGrid els={els} />
+            </div>
+          ))
+      )}
+
+      {/* Normal category list */}
+      {!isSearching && ELEMENT_CATEGORIES.map(cat => {
         const isOpen = !collapsed.has(cat.id)
         return (
           <div key={cat.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -1132,8 +1209,7 @@ export function ElementLibraryZone() {
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                 padding: '8px 12px', border: 'none', cursor: 'pointer', textAlign: 'left',
-                background: 'var(--color-bg-elevated)',
-                color: 'var(--color-text)',
+                background: 'var(--color-bg-elevated)', color: 'var(--color-text)',
                 borderBottom: isOpen ? '1px solid var(--color-border)' : 'none',
               }}
             >
@@ -1142,35 +1218,7 @@ export function ElementLibraryZone() {
                 <polyline points="1,3 5,7 9,3" fill="none" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </button>
-
-            {isOpen && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, padding: '8px 8px 10px' }}>
-                {cat.elements.map(el => {
-                  const active = activeElementType === el.id
-                  return (
-                    <button
-                      key={el.id}
-                      onClick={() => selectElement(el)}
-                      title={el.label}
-                      style={{
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                        padding: '6px 4px', borderRadius: 7, cursor: 'pointer',
-                        border: `1.5px solid ${active ? 'var(--color-accent)' : 'transparent'}`,
-                        background: active ? 'var(--color-accent-subtle)' : 'transparent',
-                        transition: 'all 100ms',
-                      }}
-                      onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--color-bg-elevated)'; e.currentTarget.style.borderColor = 'var(--color-border)' } }}
-                      onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' } }}
-                    >
-                      <TilePreview el={el} />
-                      <span style={{ fontSize: 9, color: active ? 'var(--color-accent)' : 'var(--color-text-muted)', textAlign: 'center', lineHeight: 1.2, maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%', fontWeight: active ? 600 : 400 }}>
-                        {el.label}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            {isOpen && <ElementGrid els={cat.elements} />}
           </div>
         )
       })}

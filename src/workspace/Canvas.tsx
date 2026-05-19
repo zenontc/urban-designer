@@ -758,6 +758,9 @@ export function Canvas() {
           case 'backspace':
             if (selectedIdsRef.current.length) deleteFeatures(selectedIdsRef.current)
             break
+          case 'f':
+            zoomToSelected()
+            break
           case '?':
             setShowKeyboardHelp(v => !v)
             break
@@ -1660,6 +1663,33 @@ export function Canvas() {
     feat.properties.bezierNodes = nodes
     addFeatureWithLayer(feat)
     setPenNodes([])
+  }
+
+  function zoomToSelected() {
+    const map = mapRef.current
+    if (!map) return
+    const ids = selectedIdsRef.current
+    const targets = ids.length > 0
+      ? featuresRef.current.filter(f => ids.includes(f.properties.id))
+      : featuresRef.current
+    if (targets.length === 0) return
+    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
+    function expandWith(coords: number[]) {
+      if (minLng > coords[0]) minLng = coords[0]
+      if (maxLng < coords[0]) maxLng = coords[0]
+      if (minLat > coords[1]) minLat = coords[1]
+      if (maxLat < coords[1]) maxLat = coords[1]
+    }
+    targets.forEach(f => {
+      const g = f.geometry
+      if (g.type === 'Point') expandWith(g.coordinates as number[])
+      else if (g.type === 'LineString') (g.coordinates as number[][]).forEach(expandWith)
+      else if (g.type === 'Polygon') (g.coordinates[0] as number[][]).forEach(expandWith)
+      else if (g.type === 'MultiPolygon') (g.coordinates as number[][][][]).forEach(r => r[0].forEach(expandWith))
+    })
+    if (!isFinite(minLng)) return
+    const pad = targets.length === 1 && targets[0].geometry.type === 'Point' ? 200 : 60
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: pad, maxZoom: 20, duration: 600 })
   }
 
   function duplicateSelected() {
@@ -3274,6 +3304,7 @@ export function Canvas() {
           onMouseDown={e => e.stopPropagation()}
         >
           {([
+            { label: 'Zoom to Selection  F', action: () => { zoomToSelected(); setContextMenu(null) } },
             { label: 'Duplicate', action: () => duplicateSelected() },
             { label: 'Bring to Front', action: () => { bringToFront(contextMenu.featureId); setContextMenu(null) } },
             { label: 'Send to Back',  action: () => { sendToBack(contextMenu.featureId);  setContextMenu(null) } },
@@ -3311,7 +3342,7 @@ export function Canvas() {
                 ['M', 'Measure'],['E', 'Extrude'],
               ]],
               ['Actions', [
-                ['⌘Z / ⌘⇧Z', 'Undo / Redo'],['⌘A', 'Select All'],['⌘F', 'Canvas Search'],
+                ['⌘Z / ⌘⇧Z', 'Undo / Redo'],['⌘A', 'Select All'],['⌘F', 'Canvas Search'],['F', 'Zoom to Selection'],
                 ['Del / ⌫', 'Delete selected'],['Esc', 'Cancel / Deselect'],
                 ['Shift+drag', 'Angle snap while drawing'],['Space+drag', 'Pan temporarily'],
                 ['Hold Ctrl', 'Toggle 3D view'],['?', 'Toggle this help'],
