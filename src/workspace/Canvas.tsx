@@ -1765,14 +1765,14 @@ export function Canvas() {
     // Actors — plan-view (top-down), real-world scale
     if (cat === 'actors') {
       const lat = (f.geometry as GeoJSON.Point).coordinates[1]
-      // fp: feet → pixels with a minimum so actors are always visible at planning zoom
-      const fp = (feet: number, minPx = 8) => Math.max(minPx, feetToPixels(map!, feet, lat))
+      // fp: feet → pixels at true map scale (tiny safety min so symbol never fully disappears)
+      const fp = (feet: number) => Math.max(1, feetToPixels(map!, feet, lat))
       const selRing = (r: number) => isSelected && <circle cx={0} cy={0} r={r} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />
       const selRect = (w: number, h: number) => isSelected && <rect x={-w/2-4} y={-h/2-4} width={w+8} height={h+8} rx={4} fill="none" stroke={selColor} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.7} />
 
       // ── Automobile ──────────────────────────────────────────────────────
       if (elId === 'car') {
-        const w = fp(6, 16), l = w * 2.5
+        const w = fp(6), l = w * 2.5
         const ww = Math.max(2, w * 0.22), wl = Math.max(3, l * 0.23)
         const corners: [number, number][] = [
           [-w/2 - ww*0.35, -l/2 + l*0.1],
@@ -1794,7 +1794,7 @@ export function Canvas() {
 
       // ── Delivery Vehicle ────────────────────────────────────────────────
       if (elId === 'delivery-vehicle') {
-        const w = fp(7, 16), l = w * (20/7)
+        const w = fp(7), l = w * (20/7)
         const cabL = l * 0.32
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
@@ -1810,7 +1810,7 @@ export function Canvas() {
 
       // ── Bus ─────────────────────────────────────────────────────────────
       if (elId === 'bus-vehicle') {
-        const w = fp(8.5, 20), l = w * (40/8.5)
+        const w = fp(8.5), l = w * (40/8.5)
         const nWin = Math.max(4, Math.round(l / (w * 0.85)))
         const wH = (l * 0.74) / nWin * 0.6
         const wW = w * 0.2
@@ -1836,7 +1836,7 @@ export function Canvas() {
 
       // ── Pedestrian ──────────────────────────────────────────────────────
       if (elId === 'pedestrian') {
-        const r = fp(1.5, 10)
+        const r = fp(1.5)
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
             <circle cx={0} cy={0} r={r} fill={fill} fillOpacity={0.9} />
@@ -1848,10 +1848,10 @@ export function Canvas() {
 
       // ── Bicyclist / Scooter ─────────────────────────────────────────────
       if (elId === 'bicyclist' || elId === 'scooter-rider') {
-        const bodyR = fp(1.2, 8)
-        const wheelR = Math.max(bodyR * 0.85, fp(1.0, 6))
-        const bikeL = Math.max(bodyR * 3.2, fp(5.5, 20))
-        const sw2 = Math.max(1.5, wheelR * 0.45)
+        const bodyR = fp(1.2)
+        const wheelR = fp(1.0)
+        const bikeL = fp(5.5)
+        const sw2 = Math.max(0.5, wheelR * 0.45)
         const isScooter = elId === 'scooter-rider'
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
@@ -1868,15 +1868,15 @@ export function Canvas() {
 
       // ── Wheelchair User ─────────────────────────────────────────────────
       if (elId === 'wheelchair-user') {
-        const bodyR = fp(1.5, 10)
-        const wR = fp(1.2, 7)
-        const sw2 = Math.max(1.5, wR * 0.44)
+        const bodyR = fp(1.5)
+        const wR = fp(1.2)
+        const sw2 = Math.max(0.5, wR * 0.44)
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
             <circle cx={-bodyR*1.15} cy={bodyR*0.25} r={wR} fill="none" stroke={fill} strokeWidth={sw2} />
             <circle cx={ bodyR*1.15} cy={bodyR*0.25} r={wR} fill="none" stroke={fill} strokeWidth={sw2} />
-            <circle cx={-bodyR*0.5} cy={-bodyR*0.85} r={Math.max(2, wR*0.36)} fill={fill} fillOpacity={0.6} />
-            <circle cx={ bodyR*0.5} cy={-bodyR*0.85} r={Math.max(2, wR*0.36)} fill={fill} fillOpacity={0.6} />
+            <circle cx={-bodyR*0.5} cy={-bodyR*0.85} r={wR*0.36} fill={fill} fillOpacity={0.6} />
+            <circle cx={ bodyR*0.5} cy={-bodyR*0.85} r={wR*0.36} fill={fill} fillOpacity={0.6} />
             <circle cx={0} cy={0} r={bodyR} fill={fill} fillOpacity={0.88} />
             {selRing(bodyR + wR + 4)}
           </g>
@@ -1885,9 +1885,9 @@ export function Canvas() {
 
       // ── Dog Walker ──────────────────────────────────────────────────────
       if (elId === 'dog-walker') {
-        const pr = fp(1.5, 10)
-        const dr = fp(0.8, 6)
-        const leashL = fp(4, 18)
+        const pr = fp(1.5)
+        const dr = fp(0.8)
+        const leashL = fp(4)
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
             <line x1={0} y1={-pr} x2={0} y2={-pr-leashL} stroke={fill} strokeWidth={1} strokeOpacity={0.45} strokeDasharray="2 2" />
@@ -1901,7 +1901,7 @@ export function Canvas() {
 
       // ── Outdoor Dining ──────────────────────────────────────────────────
       if (elId === 'outdoor-dining') {
-        const pr = fp(1.2, 8)
+        const pr = fp(1.2)
         const offsets: [number, number][] = [[-pr*2, -pr*0.4], [0, -pr*2.2], [pr*2, -pr*0.4], [pr*1.5, pr*1.9], [-pr*1.5, pr*1.9]]
         return (
           <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
@@ -1912,7 +1912,7 @@ export function Canvas() {
       }
 
       // ── Default person ──────────────────────────────────────────────────
-      const r = fp(1.5, 10)
+      const r = fp(1.5)
       return (
         <g key={f.properties.id} transform={`translate(${px},${py})`} style={{ pointerEvents: 'none' }}>
           <circle cx={0} cy={0} r={r} fill={fill} fillOpacity={0.9} />
@@ -2400,8 +2400,8 @@ export function Canvas() {
           if (lineLen > 2) {
             const ang = Math.atan2(y2 - y1, x2 - x1)
             const perpAng = ang + Math.PI / 2
-            const spacingPx = Math.max(6, feetToPixels(map, stallSpacingFt, coords[0][1]))
-            const depthPx   = Math.max(8, feetToPixels(map, stallDepthFt,   coords[0][1]))
+            const spacingPx = feetToPixels(map, stallSpacingFt, coords[0][1])
+            const depthPx   = feetToPixels(map, stallDepthFt,   coords[0][1])
             const bx1 = x1 + depthPx * Math.cos(perpAng)
             const by1 = y1 + depthPx * Math.sin(perpAng)
             const bx2 = x2 + depthPx * Math.cos(perpAng)
@@ -2428,7 +2428,7 @@ export function Canvas() {
             }
             // For parallel parking, also draw a dashed line at 3ft from curb (wheel stop / door zone)
             if (isParallel) {
-              const dzPx = Math.max(4, feetToPixels(map, 3, coords[0][1]))
+              const dzPx = feetToPixels(map, 3, coords[0][1])
               const dx1 = x1 + dzPx * Math.cos(perpAng), dy1 = y1 + dzPx * Math.sin(perpAng)
               const dx2 = x2 + dzPx * Math.cos(perpAng), dy2 = y2 + dzPx * Math.sin(perpAng)
               dividers.push(<line key="dz" x1={dx1} y1={dy1} x2={dx2} y2={dy2} stroke="white" strokeWidth={0.8} strokeDasharray="4 6" opacity={0.45} />)
@@ -2535,10 +2535,10 @@ export function Canvas() {
           const ang = Math.atan2(y2 - y1, x2 - x1)
           const isContinental = f.properties.elementType === 'continental-crosswalk'
           const isRaised = f.properties.elementType === 'raised-crosswalk'
-          // All dimensions in real-world feet → pixels with enforced minimums for visibility
-          const halfWidthPx = Math.max(18, feetToPixels(map, 7, coords[0][1]))  // 14ft total depth
-          const stripeWPx = Math.max(isContinental ? 9 : 6, feetToPixels(map, isContinental ? 2.5 : 2.0, coords[0][1]))
-          const gapWPx = Math.max(isContinental ? 4 : 5, feetToPixels(map, isContinental ? 1.0 : 2.0, coords[0][1]))
+          // Real-world feet → pixels (scale with map zoom)
+          const halfWidthPx = feetToPixels(map, 6, coords[0][1])   // 12ft total crosswalk depth
+          const stripeWPx = Math.max(1, feetToPixels(map, isContinental ? 1.5 : 1.0, coords[0][1]))
+          const gapWPx    = Math.max(1, feetToPixels(map, isContinental ? 0.75 : 1.0, coords[0][1]))
           const bgColor = isRaised ? '#A0956E' : '#4B5563'
           const stripes: React.ReactNode[] = []
           for (let d = 0; d < len; d += stripeWPx + gapWPx) {
@@ -2565,8 +2565,8 @@ export function Canvas() {
         const coords = (f.geometry as GeoJSON.LineString).coordinates as [number, number][]
         const spacingFt = (f.properties as any).treeSpacing ?? 30
         const treeSizeFt = (f.properties as any).treeSize ?? 10
-        const spacingPx = Math.max(12, feetToPixels(map, spacingFt, coords[0][1]))
-        const treeR = Math.max(8, feetToPixels(map, treeSizeFt / 2, coords[0][1]))
+        const spacingPx = feetToPixels(map, spacingFt, coords[0][1])
+        const treeR = feetToPixels(map, treeSizeFt / 2, coords[0][1])
         const samples = samplePolyline(map, coords, spacingPx)
         const fill = style.fillColor ?? '#22C55E'
         return (
@@ -2618,64 +2618,75 @@ export function Canvas() {
         const coords = bezNodes && bezNodes.length >= 2 ? bezierNodesToCoords(bezNodes) : rawCoords
         const avgLat = coords.reduce((s, c) => s + c[1], 0) / coords.length
         const totalWidthFt = lanes.reduce((s: number, l: StreetLane) => s + l.width, 0)
-        const totalPx = Math.max(4, feetToPixels(map, totalWidthFt, avgLat))
         const halfTotalFt = totalWidthFt / 2
         const sPts = coords.map(c => lngLatToScreen(map, c)) as [number, number][]
 
-        // Compute a path offset by offsetPx pixels perpendicular to the centerline (+ = right)
-        const offPath = (offsetPx: number): string => {
-          const off = sPts.map((pt, i) => {
-            let nx = 0, ny = 0
-            if (i > 0) { const dx = pt[0]-sPts[i-1][0], dy = pt[1]-sPts[i-1][1], l = Math.hypot(dx,dy); if (l>0){nx+=-dy/l;ny+=dx/l} }
-            if (i < sPts.length-1) { const dx = sPts[i+1][0]-pt[0], dy = sPts[i+1][1]-pt[1], l = Math.hypot(dx,dy); if (l>0){nx+=-dy/l;ny+=dx/l} }
-            const nl = Math.hypot(nx, ny); if (nl > 0) { nx /= nl; ny /= nl }
-            return [pt[0] + offsetPx * nx, pt[1] + offsetPx * ny]
-          })
-          return off.map((p, i) => `${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+        // Precompute averaged unit normals (perpendicular, pointing right of travel direction)
+        const normals: [number, number][] = sPts.map((pt, i) => {
+          let nx = 0, ny = 0
+          if (i > 0) { const dx=pt[0]-sPts[i-1][0], dy=pt[1]-sPts[i-1][1], l=Math.hypot(dx,dy); if(l>0){nx+=-dy/l;ny+=dx/l} }
+          if (i<sPts.length-1) { const dx=sPts[i+1][0]-pt[0], dy=sPts[i+1][1]-pt[1], l=Math.hypot(dx,dy); if(l>0){nx+=-dy/l;ny+=dx/l} }
+          const nl=Math.hypot(nx,ny); if(nl>0){nx/=nl;ny/=nl}
+          return [nx, ny]
+        })
+
+        // Points along the path offset by ft feet from center (negative=left, positive=right)
+        const offsetPts = (ft: number): [number, number][] => {
+          const px = feetToPixels(map, Math.abs(ft), avgLat) * Math.sign(ft)
+          return sPts.map((pt, i) => [pt[0]+px*normals[i][0], pt[1]+px*normals[i][1]])
+        }
+
+        // Filled polygon band between leftFt and rightFt from center
+        const zonePoly = (leftFt: number, rightFt: number): string => {
+          const lp = offsetPts(leftFt), rp = offsetPts(rightFt)
+          const fwd = lp.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+          const bwd = [...rp].reverse().map(p=>`L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+          return fwd+' '+bwd+' Z'
+        }
+
+        // Polyline string along a given foot-offset from center (for lane markings)
+        const offsetLine = (ft: number): string => {
+          const pts = offsetPts(ft)
+          return pts.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
         }
 
         const ZONE_CLR: Record<string, string> = {
-          'Sidewalk':        '#B8B4A0',
-          'Setback':         '#C0D0A0',
-          'Pedestrian Zone': '#CBBF96',
+          'Sidewalk':        '#C8C4B0',
+          'Setback':         '#C8D4A8',
+          'Pedestrian Zone': '#D4C8A4',
           'Bike Lane':       '#4A7A38',
-          'Travel Lane':     '#3A3A3A',
-          'Shoulder':        '#484848',
-          'Parking':         '#424242',
-          'Center Turn':     '#3A3A3A',
+          'Travel Lane':     '#505050',
+          'Shoulder':        '#585858',
+          'Parking':         '#484848',
+          'Center Turn':     '#505050',
           'Median':          '#4A6E30',
         }
 
-        // Compute per-zone screen offsets and widths
+        // Build zone polygons (left → right across the road)
         let cumFt = 0
-        const zoneLayers = lanes.map((lane: StreetLane) => {
-          const centerFt = cumFt + lane.width / 2
+        const zones = lanes.map((lane: StreetLane) => {
+          const l = cumFt - halfTotalFt
           cumFt += lane.width
-          const offFromCenter = centerFt - halfTotalFt
-          const offPx = feetToPixels(map, Math.abs(offFromCenter), avgLat) * Math.sign(offFromCenter)
-          const wPx = feetToPixels(map, lane.width, avgLat)
-          return { lane, offPx, wPx }
+          const r = cumFt - halfTotalFt
+          return { lane, l, r }
         })
 
-        // Detect center boundary index — the boundary closest to the midpoint of the total width
-        // where two Travel Lanes face each other (two-way road center line)
-        const travelLaneIndices = lanes.map((l: StreetLane, i: number) => l.label === 'Travel Lane' ? i : -1).filter((i: number) => i >= 0)
-        const midLaneIdx = lanes.length / 2
-        // centermost boundary between travel lanes that are on opposite sides of center
-        let twoWayCenterBoundary = -1
-        if (travelLaneIndices.length >= 2) {
-          // find boundary where travel lanes split from left-going to right-going
-          // heuristic: the Travel Lane | Travel Lane boundary closest to the center
-          let bestDist = Infinity
-          for (let i = 0; i < lanes.length - 1; i++) {
-            if (lanes[i].label === 'Travel Lane' && lanes[i+1].label === 'Travel Lane') {
-              const dist = Math.abs((i + 0.5) - midLaneIdx)
-              if (dist < bestDist) { bestDist = dist; twoWayCenterBoundary = i }
-            }
+        // Full road polygon (for base + border)
+        const outerD = zonePoly(-halfTotalFt, halfTotalFt)
+
+        // Find the two-way center boundary: innermost Travel Lane | Travel Lane pair
+        const midIdx = lanes.length / 2
+        let twoWayCenter = -1
+        let bestDist = Infinity
+        for (let i = 0; i < lanes.length - 1; i++) {
+          if (lanes[i].label === 'Travel Lane' && lanes[i+1].label === 'Travel Lane') {
+            const d = Math.abs((i + 0.5) - midIdx)
+            if (d < bestDist) { bestDist = d; twoWayCenter = i }
           }
         }
 
-        // Compute lane boundary markings
+        // Lane boundary markings
+        const markW = Math.max(1, feetToPixels(map, 0.5, avgLat))
         let bCumFt = 0
         const markings: React.ReactNode[] = []
         lanes.forEach((lane: StreetLane, i: number) => {
@@ -2683,39 +2694,37 @@ export function Canvas() {
           if (i === lanes.length - 1) return
           const next = lanes[i + 1]
           const lbl = lane.label, nxt = next.label
-          if (lbl === 'Sidewalk' || nxt === 'Sidewalk' || lbl === 'Setback' || nxt === 'Setback') return
-          const bOff = bCumFt - halfTotalFt
-          const bPx = feetToPixels(map, Math.abs(bOff), avgLat) * Math.sign(bOff)
-          const isCenterDiv = lbl === 'Center Turn' || nxt === 'Center Turn' || lbl === 'Median' || nxt === 'Median'
-          const isTwoWayCenter = i === twoWayCenterBoundary
-          if (isCenterDiv || isTwoWayCenter) {
-            const gap = Math.max(2.5, totalPx * 0.018)
+          if (lbl==='Sidewalk'||nxt==='Sidewalk'||lbl==='Setback'||nxt==='Setback') return
+          const bFt = bCumFt - halfTotalFt
+          const isCenterDiv = lbl==='Center Turn'||nxt==='Center Turn'||lbl==='Median'||nxt==='Median'
+          const isCenter = i === twoWayCenter
+          if (isCenterDiv || isCenter) {
+            const gap = Math.max(feetToPixels(map, 0.5, avgLat), 2)
             markings.push(
-              <path key={`dya${i}`} d={offPath(bPx - gap)} fill="none" stroke="#F5C518" strokeWidth={Math.max(1, totalPx * 0.022)} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} />,
-              <path key={`dyb${i}`} d={offPath(bPx + gap)} fill="none" stroke="#F5C518" strokeWidth={Math.max(1, totalPx * 0.022)} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} />,
+              <path key={`dya${i}`} d={offsetLine(bFt)} fill="none" stroke="#F5C518" strokeWidth={Math.max(markW*2+gap*2, 4)} strokeLinecap="butt" />,
+              <path key={`dym${i}`} d={offsetLine(bFt)} fill="none" stroke={ZONE_CLR[(lbl==='Median'||nxt==='Median')?'Median':'Center Turn'] ?? '#505050'} strokeWidth={gap*1.5} strokeLinecap="butt" />,
             )
-          } else if (lbl === 'Bike Lane' || nxt === 'Bike Lane' || lbl === 'Parking' || nxt === 'Parking' || lbl === 'Shoulder' || nxt === 'Shoulder') {
-            markings.push(
-              <path key={`ws${i}`} d={offPath(bPx)} fill="none" stroke="#FFFFFF" strokeWidth={Math.max(1, totalPx * 0.022)} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} />,
-            )
-          } else if (lbl === 'Travel Lane' && nxt === 'Travel Lane') {
-            markings.push(
-              <path key={`wd${i}`} d={offPath(bPx)} fill="none" stroke="#FFFFFF" strokeWidth={Math.max(0.8, totalPx * 0.016)} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} strokeDasharray="10 20" />,
-            )
+          } else if (lbl==='Bike Lane'||nxt==='Bike Lane'||lbl==='Parking'||nxt==='Parking'||lbl==='Shoulder'||nxt==='Shoulder') {
+            markings.push(<path key={`ws${i}`} d={offsetLine(bFt)} fill="none" stroke="white" strokeWidth={markW} strokeLinecap="butt" />)
+          } else if (lbl==='Travel Lane'&&nxt==='Travel Lane') {
+            const dashLen = Math.max(8, feetToPixels(map, 10, avgLat))
+            const gapLen  = Math.max(16, feetToPixels(map, 20, avgLat))
+            markings.push(<path key={`wd${i}`} d={offsetLine(bFt)} fill="none" stroke="white" strokeWidth={markW*0.75} strokeLinecap="butt" strokeDasharray={`${dashLen} ${gapLen}`} />)
           }
         })
 
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-            {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={totalPx + 6} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} strokeOpacity={0.35} />}
-            {/* Dark curb border */}
-            <path d={path} fill="none" stroke="#111111" strokeWidth={totalPx + 2} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} />
-            {/* Zone background fills */}
-            {zoneLayers.map(({ lane, offPx, wPx }: { lane: StreetLane; offPx: number; wPx: number }) => (
-              <path key={`z${lane.id}`} d={offPath(offPx)} fill="none"
-                    stroke={ZONE_CLR[lane.label] ?? '#3A3A3A'}
-                    strokeWidth={wPx + 1} strokeLinecap="butt" strokeLinejoin="miter" strokeMiterlimit={10} />
+            {isSelected && <path d={outerD} fill={selColor} fillOpacity={0.15} stroke={selColor} strokeWidth={3} strokeOpacity={0.6} />}
+            {/* Dark asphalt base (shows at ends and gaps) */}
+            <path d={outerD} fill="#222222" />
+            {/* Zone filled polygons — tile perfectly, no stroke artifacts */}
+            {zones.map(({ lane, l, r }) => (
+              <path key={lane.id} d={zonePoly(l, r)} fill={ZONE_CLR[lane.label] ?? '#505050'} />
             ))}
+            {/* Curb edge lines on top */}
+            <path d={offsetLine(-halfTotalFt)} fill="none" stroke="#1a1a1a" strokeWidth={Math.max(1, feetToPixels(map, 0.5, avgLat))} strokeLinecap="butt" />
+            <path d={offsetLine( halfTotalFt)} fill="none" stroke="#1a1a1a" strokeWidth={Math.max(1, feetToPixels(map, 0.5, avgLat))} strokeLinecap="butt" />
             {/* Lane markings */}
             {markings}
           </g>
