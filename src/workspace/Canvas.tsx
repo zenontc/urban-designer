@@ -568,7 +568,10 @@ export function Canvas() {
       navigator.geolocation.getCurrentPosition(
         pos => {
           const m = mapRef.current
-          if (m) m.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 })
+          if (!m) return
+          const doFly = () => m.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 })
+          if (styleLoadedRef.current) doFly()
+          else m.once('load', doFly)
         },
         () => { /* keep world view */ },
         { timeout: 10000, maximumAge: 300000 },
@@ -597,7 +600,7 @@ export function Canvas() {
     const map = mapRef.current
     if (!map || !styleLoadedRef.current) return
     if (mode3D) {
-      map.dragRotate.enable()
+      // Keep dragRotate disabled — we handle bearing/pitch via Ctrl+drag manually
       map.easeTo({ pitch: 55, duration: 600 })
       // Narrow FOV ≈ parallel/isometric projection
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2287,19 +2290,28 @@ export function Canvas() {
           const [x2, y2] = lngLatToScreen(map, coords[coords.length - 1])
           const len = Math.hypot(x2 - x1, y2 - y1)
           const ang = Math.atan2(y2 - y1, x2 - x1)
-          const widthPx = feetToPixels(map, 6, coords[0][1])
-          const stripeW = f.properties.elementType === 'continental-crosswalk' ? 14 : 10
-          const gapW = f.properties.elementType === 'continental-crosswalk' ? 6 : 10
+          const isContinental = f.properties.elementType === 'continental-crosswalk'
+          const isRaised = f.properties.elementType === 'raised-crosswalk'
+          // All dimensions in real-world feet → pixels
+          const halfWidthPx = feetToPixels(map, 5, coords[0][1])   // 10 ft total crosswalk depth
+          const stripeWPx = feetToPixels(map, isContinental ? 1.5 : 1.0, coords[0][1])
+          const gapWPx = feetToPixels(map, isContinental ? 0.5 : 1.0, coords[0][1])
+          const bgColor = isRaised ? '#A0956E' : '#4B5563'
           const stripes: React.ReactNode[] = []
-          for (let d = 0; d < len; d += stripeW + gapW) {
-            const w = Math.min(stripeW, len - d)
-            stripes.push(<rect key={d} x={x1 + d * Math.cos(ang)} y={y1 + d * Math.sin(ang) - widthPx / 2} width={w} height={widthPx} fill="white" opacity={0.9} transform={`rotate(${ang * 180 / Math.PI},${x1 + d * Math.cos(ang)},${y1 + d * Math.sin(ang)})`} />)
+          for (let d = 0; d < len; d += stripeWPx + gapWPx) {
+            const w = Math.min(stripeWPx, len - d)
+            stripes.push(<rect key={d}
+              x={x1 + d * Math.cos(ang)} y={y1 + d * Math.sin(ang) - halfWidthPx}
+              width={w} height={halfWidthPx * 2}
+              fill={isRaised ? 'rgba(255,255,255,0.55)' : 'white'} opacity={0.92}
+              transform={`rotate(${ang * 180 / Math.PI},${x1 + d * Math.cos(ang)},${y1 + d * Math.sin(ang)})`} />)
           }
           return (
             <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-              <rect x={x1} y={y1 - widthPx / 2} width={len} height={widthPx} fill="#555" transform={`rotate(${ang * 180 / Math.PI},${x1},${y1})`} />
+              <rect x={x1} y={y1 - halfWidthPx} width={len} height={halfWidthPx * 2}
+                fill={bgColor} transform={`rotate(${ang * 180 / Math.PI},${x1},${y1})`} />
               {stripes}
-              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={widthPx + 6} strokeOpacity={0.35} />}
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={halfWidthPx * 2 + 6} strokeOpacity={0.35} />}
             </g>
           )
         }
@@ -2400,22 +2412,43 @@ export function Canvas() {
 
       // ── Building rendering ──
       if (f.properties.category === 'buildings' && !isLine && f.geometry.type === 'Polygon') {
+        const bldExtH = Math.max(
+          style.extrudeHeight ?? 0,
+          mode3D ? (((f.properties as any).floors ?? 2) as number) * 3.5 : 0,
+        )
+        if (showShadowPanel && bldExtH > 0 && map) {
+          const shadowFactor = shadowAltitude > 0.05 ? 1 / Math.tan(shadowAltitude) : 20
+          const shadowLenFt = bldExtH * 3.28084 * shadowFactor * 0.5
+          const coords0 = (f.geometry as GeoJSON.Polygon).coordinates[0] as [number,number][]
+          const avgLat = coords0.reduce((s, c) => s + c[1], 0) / coords0.length
+          const zoom = (mapRef.current as unknown as { getZoom?: () => number })?.getZoom?.() ?? 15
+          const lenPx = (shadowLenFt / 5280) * (40075016.68 * Math.cos(avgLat * Math.PI / 180) / Math.pow(2, zoom)) * 256 / (40075016.68 / 5280)
+          const sDx = -Math.sin(shadowAzimuth + Math.PI) * lenPx
+          const sDy = Math.cos(shadowAzimuth + Math.PI) * lenPx
+          const shadowPts = coords0.map(c => { const [sx2, sy2] = lngLatToScreen(map, c); return [sx2 + sDx, sy2 + sDy] })
+          const shadowD = shadowPts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ') + ' Z'
+          return (
+            <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
+              <path d={shadowD} fill="rgba(0,0,0,0.28)" />
+              {!mode3D && <path d={path} fill="#FFFFFF" fillOpacity={0.95} />}
+              <path d={path} fill="none" stroke={isSelected ? selColor : '#000000'}
+                strokeWidth={isSelected ? sw + 1.5 : 1.5} strokeLinejoin="round" />
+              {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 5} strokeOpacity={0.25} strokeLinejoin="round" />}
+            </g>
+          )
+        }
         return (
           <g key={f.properties.id} style={{ pointerEvents: 'none' }}>
-            <path d={path} fill="#FFFFFF" fillOpacity={0.95} />
+            {!mode3D && <path d={path} fill="#FFFFFF" fillOpacity={0.95} />}
             <path d={path} fill="none" stroke={isSelected ? selColor : '#000000'}
-              strokeWidth={isSelected ? sw + 1.5 : sw} strokeLinejoin="round" />
+              strokeWidth={isSelected ? sw + 1.5 : 1.5} strokeLinejoin="round" />
             {isSelected && <path d={path} fill="none" stroke={selColor} strokeWidth={sw + 5} strokeOpacity={0.25} strokeLinejoin="round" />}
           </g>
         )
       }
 
-      // ── Building/polygon shadow ──
-      const explicitExtH = style.extrudeHeight ?? 0
-      const autoExtH = mode3D && f.properties.category === 'buildings' && f.geometry.type === 'Polygon'
-        ? ((f.properties.floors ?? 2) as number) * 3.5
-        : 0
-      const extH = Math.max(explicitExtH, autoExtH)
+      // ── Shadow for non-building polygons with explicit extrude height ──
+      const extH = style.extrudeHeight ?? 0
       if (showShadowPanel && extH > 0 && !isLine && map) {
         const shadowFactor = shadowAltitude > 0.05 ? 1 / Math.tan(shadowAltitude) : 20
         const shadowLengthFt = extH * 3.28084 * shadowFactor * 0.5
